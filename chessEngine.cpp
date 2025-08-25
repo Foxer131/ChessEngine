@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <cctype>
 #include <stack>
+#include <cstdint>
 
 using namespace std;
 
@@ -123,17 +124,53 @@ class Board {
         void setupBoard();
         void generateHashKey(Color sideToMove);
 
-        void display() const {
-            cout << "  a b c d e f g h\n";
-            cout << " +-----------------+\n";
-            for (int r = 0; r < 8; ++r) {
-                cout << 8 - r << "| ";
-                for (int c = 0; c < 8; ++c) {
-                    cout << (grid[r][c] ? grid[r][c]->getSymbol() : '.') << " ";
+        void display(bool Inverted) const {
+            if (!Inverted) {
+                cout << "  a b c d e f g h\n";
+                cout << " +-----------------+\n";
+                for (int r = 0; r < 8; ++r) {
+                    cout << 8 - r << "| ";
+                    for (int c = 0; c < 8; ++c) {
+                        cout << (grid[r][c] ? grid[r][c]->getSymbol() : '.') << " ";
+                    }
+                    cout << "|\n";
                 }
-                cout << "|\n";
+                cout << " +-----------------+\n";
+            } else {
+                cout << "  h g f e d c b a\n";
+                cout << " +-----------------+\n";
+                for (int r = 7; r >= 0; --r) {
+                    cout << 8 - r << "| ";
+                    for (int c = 7; c >= 0; --c) {
+                        cout << (grid[r][c] ? grid[r][c]->getSymbol() : '.') << " ";
+                    }
+                    cout << "|\n";
+                }
             }
-            cout << " +-----------------+\n";
+        }
+
+        void makeNullMove() {
+            BoardState state;
+            state.hashKey = this->hashKey;
+            state.enPassantTargetSquare = this->enPassantTargetSquare;
+            history.push(std::move(state));
+
+            if (this->enPassantTargetSquare.col != -1) {
+                this->hashKey ^= Zobrist::enPassantKeys[this->enPassantTargetSquare.col];
+            }
+            
+            this->enPassantTargetSquare = {-1, -1};
+            this->hashKey ^= Zobrist::sideKey;
+        }
+
+        void unmakeNullMove() {
+            if (history.empty()) return;
+
+            BoardState state = std::move(history.top());
+            history.pop();
+
+            this->hashKey = state.hashKey;
+            this->enPassantTargetSquare = state.enPassantTargetSquare;
         }
 
         bool isValidPosition(const Position& position) const {
@@ -161,7 +198,7 @@ class Board {
         Position findKing(Color kingColor) const;
         bool isKingInCheck(Color kingColor) const;
         bool isSquareAttackedBy(const Position& pos, Color attackerColor) const;
-        vector<Move> getAllLegalMoves(Color playerColor, bool capturesOnly);
+        vector<Move> getAllLegalMoves(Color playerColor);
 
         bool canWhiteCastleKingside()  const { 
             return !whiteKingMoved && !whiteRookHMoved; 
@@ -185,6 +222,10 @@ class Board {
 
         uint64_t getHashKey() const { 
             return hashKey; 
+        }
+
+        void setHashKey(uint64_t hash) {
+            hashKey = hash;
         }
 
 };
@@ -659,7 +700,7 @@ void Board::unmakeMove() {
 }
 
 
-vector<Move> Board::getAllLegalMoves(Color playerColor, bool capturesOnly) {
+vector<Move> Board::getAllLegalMoves(Color playerColor) {
     vector<Move> legalMoves;
     legalMoves.reserve(256);
 
@@ -671,12 +712,6 @@ vector<Move> Board::getAllLegalMoves(Color playerColor, bool capturesOnly) {
 
             vector<Move> moves = piece->getValidMoves({r, c}, *this);
             for (const auto& move : moves) {
-                if (capturesOnly) {
-                    bool isCapture = getPiece(move.to) != nullptr || (piece->type() == PT_PAWN && move.to == getEnPassantTarget());
-                    if (!isCapture) 
-                        continue;
-                }
-
                 makeMove(move);
                 if (!isKingInCheck(playerColor)) {
                     legalMoves.push_back(move);
@@ -687,7 +722,6 @@ vector<Move> Board::getAllLegalMoves(Color playerColor, bool capturesOnly) {
     }
     return legalMoves;
 }
-
 
 class Game {
     private:
@@ -705,14 +739,15 @@ class Game {
             int toRow   = 8 - (moveStr[3] - '0');
             char promotion = ' ';
             if (moveStr.length() == 5) 
-                promotion = (char)tolower((unsigned char)moveStr[4]);
+                promotion = (char)tolower(moveStr[4]);
             return { 
                 { fromRow, fromCol }, { toRow, toCol }, promotion 
             };
         }
+        
 
         bool hasLegalMoves(Color playerColor) { 
-            return !board.getAllLegalMoves(playerColor, false).empty(); 
+            return !board.getAllLegalMoves(playerColor).empty(); 
         }
 
         bool isCheckmate(Color kingColor) { 
@@ -770,10 +805,23 @@ class Game {
             engine = make_unique<Engine>(*this);
         }
 
+        string moveToString(Move move) {
+            string s;
+            s += char(move.from.col + 'a');
+            s += char('8' - move.from.row);
+            s += char('a' + move.to.col);
+            s += char('8' - move.to.row);
+            if (move.promotionPiece != ' ')
+                s += toupper(move.promotionPiece);
+            return s;
+        }
+
         const Board& getBoard() const { return board; }
         Board& getBoardForEngine() { return board; }
 
-        void run();
+        void humanTurn();
+        void engineTurn(int depth);
+        void run(int depth);
 };
 
 enum TTFlag { 
@@ -830,26 +878,34 @@ class Engine {
         static constexpr double rookValue   = 5.0;
         static constexpr double queenValue  = 9.0;
         static constexpr double kingValue   = 200.0;
-        static constexpr double doubledPawnPenalty  = -0.35;
-        static constexpr double isolatedPawnPenalty = -0.20;
+        static constexpr double doubledPawnPenalty  = -0.15;
+        static constexpr double isolatedPawnPenalty = -0.10;
         const double passedPawnBonus[8] = { 0.0, 0.2, 0.4, 0.75, 1.25, 2.0, 3.0, 4.5 };
+        int gamePhase = 0;
+        const int pawnPhase = 1;
+        const int knightPhase = 1;
+        const int bishopPhase = 1;
+        const int rookPhase = 2;
+        const int queenPhase = 4;
+        // Total phase value for normalization
+        const int totalPhase = (16 * pawnPhase) + (4 * knightPhase) + (4 * bishopPhase) + (4 * rookPhase) + (2 * queenPhase);
         const double pawnTable[8][8] = {
             {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
-            {0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5},
-            {0.1, 0.1, 0.2, 0.3, 0.3, 0.2, 0.1, 0.1},
-            {0.05, 0.05, 0.1, 0.25, 0.25, 0.1, 0.05, 0.05},
-            {0.0, 0.0, 0.0, 0.2, 0.2, 0.0, 0.0, 0.0},
-            {0.05, -0.05, -0.1, 0.0, 0.0, -0.1, -0.05, 0.05},
-            {0.05, 0.1, 0.1, -0.2, -0.2, 0.1, 0.1, 0.05},
-            {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+            {0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8},
+            {0.3, 0.3, 0.4, 0.5, 0.5, 0.4, 0.3, 0.3},
+            {0.2, 0.2, 0.3, 0.55, 0.55, 0.3, 0.2, 0.2},     
+            {0.1, 0.1, 0.2, 0.5, 0.5, 0.2, 0.1, 0.1},       
+            {0.05, 0.0, 0.0, 0.05, 0.05, 0.0, 0.0, 0.05},  
+            {0.0, 0.0, 0.0, -0.2, -0.2, 0.0, 0.0, 0.0},     
+            {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}        
         };
         const double knightTable[8][8] = {
             {-0.5, -0.4, -0.3, -0.3, -0.3, -0.3, -0.4, -0.5},
             {-0.4, -0.2, 0.0, 0.0, 0.0, 0.0, -0.2, -0.4},
-            {-0.3, 0.0, 0.1, 0.15, 0.15, 0.1, 0.0, -0.3},
-            {-0.3, 0.05, 0.15, 0.2, 0.2, 0.15, 0.05, -0.3},
-            {-0.3, 0.0, 0.15, 0.2, 0.2, 0.15, 0.0, -0.3},
-            {-0.3, 0.05, 0.1, 0.15, 0.15, 0.1, 0.05, -0.3},
+            {-0.3, 0.0, 0.15, 0.15, 0.15, 0.15, 0.0, -0.3},   // Better central squares
+            {-0.3, 0.05, 0.15, 0.25, 0.25, 0.15, 0.05, -0.3}, // Stronger center
+            {-0.3, 0.0, 0.15, 0.25, 0.25, 0.15, 0.0, -0.3},
+            {-0.3, 0.05, 0.15, 0.15, 0.15, 0.15, 0.05, -0.3},
             {-0.4, -0.2, 0.0, 0.05, 0.05, 0.0, -0.2, -0.4},
             {-0.5, -0.4, -0.3, -0.3, -0.3, -0.3, -0.4, -0.5}
         };
@@ -881,7 +937,7 @@ class Engine {
             {-0.2, -0.3, -0.3, -0.4, -0.4, -0.3, -0.3, -0.2},
             {-0.1, -0.2, -0.2, -0.2, -0.2, -0.2, -0.2, -0.1},
             {0.2, 0.2, 0.0, 0.0, 0.0, 0.0, 0.2, 0.2},
-            {0.2, 0.3, 0.1, 0.0, 0.0, 0.1, 0.3, 0.2}
+            {0.2, 0.3, 0.1, 0.0, 0.0, 0.1, 0.3, 0.2}  // Less extreme back rank bonus
         };
         const double kingTableEndgame[8][8] = {
             {-0.5, -0.4, -0.3, -0.2, -0.2, -0.3, -0.4, -0.5},
@@ -899,7 +955,88 @@ class Engine {
             return v[typeIdx];
         }
 
-        double getPieceValue(IMoveable* piece, int r, int c, bool isEndgame) const {
+        double mobilityBonus(IMoveable* piece, const Position& position, const Board& board) const {
+            int t = piece->type();
+
+            switch (t) {
+                case PT_ROOK: return piece->getValidMoves(position, board).size() * 0.01;
+                case PT_QUEEN: return piece->getValidMoves(position, board).size() * 0.01;
+                case PT_KNIGHT: return piece->getValidMoves(position, board).size() * 0.03;
+                case PT_BISHOP: return piece->getValidMoves(position, board).size() * 0.02;
+            }
+
+            return 0.0;
+        }
+
+        double evaluateKingSafety(const Board& board, Color kingColor, double phaseFactor) {
+            Position kingPos = board.findKing(kingColor);
+            if (kingPos.row == -1) return 0.0;
+
+            double safetyScore = 0.0;
+            Color opponentColor = (kingColor == WHITE) ? BLACK : WHITE;
+            
+            // Pawn shield evaluation (more important in middlegame)
+            if (phaseFactor > 0.3) { // Only care about pawn shield if not deep endgame
+                int pawnShieldRow = (kingColor == WHITE) ? kingPos.row - 1 : kingPos.row + 1;
+                double shieldBonus = 0.0;
+                
+                for (int col = std::max(0, kingPos.col - 1); col <= std::min(7, kingPos.col + 1); col++) {
+                    IMoveable* pawn = board.getPiece({pawnShieldRow, col});
+                    if (pawn && pawn->type() == PT_PAWN && pawn->getColor() == kingColor) {
+                        shieldBonus += 0.1;
+                    } else {
+                        shieldBonus -= 0.15; // Penalty for missing shield pawn
+                    }
+                }
+                safetyScore += shieldBonus * phaseFactor;
+            }
+
+            // Open files near king (dangerous in middlegame)
+            for (int col = std::max(0, kingPos.col - 1); col <= std::min(7, kingPos.col + 1); col++) {
+                bool openFile = true;
+                for (int row = 0; row < 8; row++) {
+                    IMoveable* piece = board.getPiece({row, col});
+                    if (piece && piece->type() == PT_PAWN) {
+                        openFile = false;
+                        break;
+                    }
+                }
+                if (openFile) {
+                    safetyScore -= 0.2 * phaseFactor; // Penalty for open files near king
+                }
+            }
+
+            return (kingColor == WHITE) ? safetyScore : -safetyScore;
+        }
+
+        double evaluatePieceCoordination(const Board& board, Color color) {
+            double coordination = 0.0;
+            
+            // Find all pieces of this color
+            vector<Position> pieces;
+            for (int r = 0; r < 8; r++) {
+                for (int c = 0; c < 8; c++) {
+                    IMoveable* piece = board.getPiece({r, c});
+                    if (piece && piece->getColor() == color && piece->type() != PT_PAWN && piece->type() != PT_KING) {
+                        pieces.push_back({r, c});
+                    }
+                }
+            }
+            
+            // Bonus for pieces defending each other
+            for (const auto& pos : pieces) {
+                for (const auto& otherPos : pieces) {
+                    if (pos == otherPos) continue;
+                    if (board.isSquareAttackedBy(otherPos, color)) {
+                        coordination += 0.05; // Small bonus for mutual defense
+                    }
+                }
+            }
+            
+            return (color == WHITE) ? coordination : -coordination;
+        }
+
+        double getPieceValue(IMoveable* piece, int r, int c, int gamePhase) const {
             if (!piece) return 0.0;
             int t = piece->type();
             Color col = piece->getColor();
@@ -924,40 +1061,203 @@ class Engine {
                     break;
                 case PT_QUEEN:  
                     base = queenValue;  break;
-                case PT_KING:
+                case PT_KING: {
                     base = kingValue;
-                    pst = (isEndgame ? ((col==WHITE) ? kingTableEndgame[r][c] : kingTableEndgame[7-r][c])
-                                    : ((col==WHITE) ? kingTableMidgame[r][c] : kingTableMidgame[7-r][c]));
+                    double mg_pst = (col==WHITE) ? kingTableMidgame[r][c] : kingTableMidgame[7-r][c];
+                    double eg_pst = (col==WHITE) ? kingTableEndgame[r][c] : kingTableEndgame[7-r][c];
+
+                    double phaseRatio = (double)gamePhase / totalPhase;
+                    pst = (mg_pst * phaseRatio) + (eg_pst * (1.0 - phaseRatio));
                     break;
+                }
             }
             return base + pst;
         }
 
-        double evaluatePosition(Board& board) {
-            double score = 0.0;
-            int materialCount = 0;
+        Color verifySquareColor(const Position& position) const {
+            int v = position.row + position.col;
+            return (v % 2 == 0) ? WHITE : BLACK;
+        }
+
+       double evaluatePosition(Board& board, Color playerColor) {
+             double score = 0.0;
             int whitePawnsPerFile[8] = {0};
             int blackPawnsPerFile[8] = {0};
+            int gamePhase = 0;
+            int whiteBishops = 0, whiteKnights = 0;
+            int blackBishops = 0, blackKnights = 0;
+            double developmentBonus = 0.0;
+            int pieceCount = 0;
 
             for (int r = 0; r < 8; ++r) {
                 for (int c = 0; c < 8; ++c) {
                     IMoveable* piece = board.getPiece({r, c});
+                    if (!piece) continue;
+                    
+                    pieceCount++;
+                    switch (piece->type()) {
+                        case PT_PAWN:   gamePhase += pawnPhase; break;   
+                        case PT_KNIGHT: gamePhase += knightPhase; break;
+                        case PT_BISHOP: gamePhase += bishopPhase; break;
+                        case PT_ROOK:   gamePhase += rookPhase; break;
+                        case PT_QUEEN:  gamePhase += queenPhase; break;
+                    }
+                }
+            }
+
+            double phaseFactor = std::min(1.0, (double)gamePhase / totalPhase);
+
+            if (board.getPiece({7, 1}) == nullptr || board.getPiece({7, 1})->type() != PT_KNIGHT) {
+                developmentBonus += 0.05 * phaseFactor; 
+            }
+            if (board.getPiece({7, 6}) == nullptr || board.getPiece({7, 6})->type() != PT_KNIGHT) {
+                developmentBonus += 0.05 * phaseFactor;
+            }
+            if (board.getPiece({0, 1}) == nullptr || board.getPiece({0, 1})->type() != PT_KNIGHT) {
+                developmentBonus -= 0.05 * phaseFactor;
+            }
+            if (board.getPiece({0, 6}) == nullptr || board.getPiece({0, 6})->type() != PT_KNIGHT) {
+                developmentBonus -= 0.05 * phaseFactor;
+            }
+
+            // Add bishop development bonus
+            if (board.getPiece({7, 2}) == nullptr || board.getPiece({7, 2})->type() != PT_BISHOP) {
+                developmentBonus += 0.04 * phaseFactor;
+            }
+            if (board.getPiece({7, 5}) == nullptr || board.getPiece({7, 5})->type() != PT_BISHOP) {
+                developmentBonus += 0.04 * phaseFactor;
+            }
+            if (board.getPiece({0, 2}) == nullptr || board.getPiece({0, 2})->type() != PT_BISHOP) {
+                developmentBonus -= 0.04 * phaseFactor;
+            }
+            if (board.getPiece({0, 5}) == nullptr || board.getPiece({0, 5})->type() != PT_BISHOP) {
+                developmentBonus -= 0.04 * phaseFactor;
+            }
+
+            score += developmentBonus;
+
+            // A single pass over the board to gather all piece-related data
+            for (int r = 0; r < 8; ++r) {
+                for (int c = 0; c < 8; ++c) {
+                    Position currentPos = {r, c};
+                    IMoveable* piece = board.getPiece(currentPos);
                     if (!piece) 
                         continue;
 
-                    if (piece->type() != PT_KING) 
-                        materialCount++;
-                    if (piece->type() == PT_PAWN) {
-                        if (piece->getColor() == WHITE) 
-                            whitePawnsPerFile[c]++;
-                        else 
-                            blackPawnsPerFile[c]++;
+                    if (piece->getColor() == WHITE) {
+                        if (piece->type() == PT_BISHOP) whiteBishops++;
+                        else if (piece->type() == PT_KNIGHT) whiteKnights++;
+                        else if (piece->type() == PT_PAWN)   whitePawnsPerFile[c]++;
+                    } else {
+                        if (piece->type() == PT_BISHOP) blackBishops++;
+                        else if (piece->type() == PT_KNIGHT) blackKnights++;
+                        else if (piece->type() == PT_PAWN)   blackPawnsPerFile[c]++;
                     }
-                    double value = getPieceValue(piece, r, c, materialCount < 12);
+
+                    if (piece->type() == PT_ROOK) {
+                        double mobilityBonus = 0.0;
+                        int directions[4][2] = {{-1,0}, {1,0}, {0,-1}, {0,1}};
+                        for(auto& dir : directions) {
+                            int _r = r, _c = c;
+                            while(true) {
+                                _r += dir[0];
+                                _c += dir[1];
+
+                                if (!board.isValidPosition({_r,_c}))
+                                    break;
+                                if (board.getPiece({_r,_c}) != nullptr) 
+                                    break;
+
+                                mobilityBonus += 0.05;
+                            }
+                        }
+                        score += (piece->getColor() == WHITE) ? mobilityBonus : -mobilityBonus;
+
+                    } 
+                    if (piece->type() == PT_BISHOP) {
+                        Color bishopSquareColor = verifySquareColor({r, c});
+                        int obstructingPawns = 0;
+
+                        if (piece->getColor() == WHITE) {
+                            for (int pawn_r = 3; pawn_r <= 4; ++pawn_r) { // Ranks 4 and 5
+                                for (int pawn_c = 3; pawn_c <= 4; ++pawn_c) { // Files d and e
+                                    IMoveable* p = board.getPiece({pawn_r, pawn_c});
+                                    if (p && p->type() == PT_PAWN && p->getColor() == WHITE) {
+                                        if (verifySquareColor({pawn_r, pawn_c}) == bishopSquareColor) {
+                                            obstructingPawns++;
+                                        }
+                                    }
+                                }
+                            }
+                        } else { // For Black Bishop
+                            for (int pawn_r = 3; pawn_r <= 4; ++pawn_r) { // Ranks 4 and 5
+                                for (int pawn_c = 3; pawn_c <= 4; ++pawn_c) { // Files d and e
+                                    IMoveable* p = board.getPiece({pawn_r, pawn_c});
+                                    if (p && p->type() == PT_PAWN && p->getColor() == BLACK) {
+                                        if (verifySquareColor({pawn_r, pawn_c}) == bishopSquareColor) {
+                                            obstructingPawns++;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        double penalty = 0.0;
+                        if (obstructingPawns == 1) penalty = 0.2;
+                        if (obstructingPawns == 2) penalty = 0.5;
+                        if (obstructingPawns >= 3) penalty = 0.9;
+
+                        // Apply the penalty to the final score
+                        if (piece->getColor() == WHITE) {
+                            score -= penalty;
+                        } else {
+                            score += penalty;
+                        }
+                    }
+
+                    if (piece->type() != PT_PAWN && piece->type() != PT_KING) {
+                        double bonus = mobilityBonus(piece, currentPos, board);
+                        if (piece->getColor() == WHITE) {
+                            score += bonus;
+                        } else {
+                            score -= bonus;
+                        }
+                    }
+
+
+                    double value = getPieceValue(piece, r, c, gamePhase);
                     score += (piece->getColor() == WHITE) ? value : -value;
                 }
             }
+            // Bishop pair is strongest in the OPEN endgame
+            if (whiteBishops >= 2) score += 0.05 * (1.0 - phaseFactor);
+            if (blackBishops >= 2) score -= 0.05 * (1.0 - phaseFactor);
             
+            // Knight pair is strongest in the CLOSED opening/middlegame
+            if (whiteKnights >= 2) score += 0.02 * phaseFactor;
+            if (blackKnights >= 2) score -= 0.02 * phaseFactor;
+
+            double centerControl = 0.0;
+            Position centerSquares[] = {{3,3}, {3,4}, {4,3}, {4,4}}; // d4, d5, e4, e5
+            Position extendedCenter[] = {{2,2}, {2,3}, {2,4}, {2,5}, {3,2}, {3,5}, {4,2}, {4,5}, {5,2}, {5,3}, {5,4}, {5,5}};
+            
+            for (const auto& sq : centerSquares) {
+                IMoveable* piece = board.getPiece(sq);
+                if (piece) {
+                    double bonus = 0.2; // Base bonus for occupying center
+                    if (piece->type() == PT_PAWN) bonus = 0.3;
+                    else if (piece->type() == PT_KNIGHT) bonus = 0.25;
+                    centerControl += (piece->getColor() == WHITE) ? bonus : -bonus;
+                }
+                
+                // Bonus for attacking center squares
+                if (board.isSquareAttackedBy(sq, WHITE)) centerControl += 0.05;
+                if (board.isSquareAttackedBy(sq, BLACK)) centerControl -= 0.05;
+            }
+            
+            score += centerControl * phaseFactor;
+
+            // Pawn Structure Evaluation
             double pawnStructureScore = 0.0;
             for (int c = 0; c < 8; ++c) {
                 if (whitePawnsPerFile[c] > 1) pawnStructureScore += (whitePawnsPerFile[c] - 1) * doubledPawnPenalty;
@@ -975,7 +1275,8 @@ class Engine {
                     pawnStructureScore -= isolatedPawnPenalty;
                 }
             }
-            
+            score += pawnStructureScore;
+
             for (int r = 0; r < 8; ++r) {
                 for (int c = 0; c < 8; ++c) {
                     IMoveable* piece = board.getPiece({r, c});
@@ -984,88 +1285,111 @@ class Engine {
                     bool isPassed = true;
                     if (piece->getColor() == WHITE) {
                         for (int lookAheadRow = r - 1; lookAheadRow >= 0; --lookAheadRow) {
-                            if ((c > 0 && board.getPiece({lookAheadRow, c - 1}) && board.getPiece({lookAheadRow, c - 1})->type() == PT_PAWN && board.getPiece({lookAheadRow, c - 1})->getColor() == BLACK) ||
-                                (board.getPiece({lookAheadRow, c}) && board.getPiece({lookAheadRow, c})->type() == PT_PAWN && board.getPiece({lookAheadRow, c})->getColor() == BLACK) ||
-                                (c < 7 && board.getPiece({lookAheadRow, c + 1}) && board.getPiece({lookAheadRow, c + 1})->type() == PT_PAWN && board.getPiece({lookAheadRow, c + 1})->getColor() == BLACK)) {
+                            if ((c > 0 && board.getPiece({lookAheadRow, c - 1}) && board.getPiece({lookAheadRow, c - 1})->getColor() == BLACK && board.getPiece({lookAheadRow, c-1})->type() == PT_PAWN) ||
+                                (board.getPiece({lookAheadRow, c}) && board.getPiece({lookAheadRow, c})->getColor() == BLACK && board.getPiece({lookAheadRow, c})->type() == PT_PAWN) ||
+                                (c < 7 && board.getPiece({lookAheadRow, c + 1}) && board.getPiece({lookAheadRow, c + 1})->getColor() == BLACK && board.getPiece({lookAheadRow, c+1})->type() == PT_PAWN)) {
                                 isPassed = false;
                                 break;
                             }
                         }
-                        if (isPassed) pawnStructureScore += passedPawnBonus[7 - r];
+                        if (isPassed) score += passedPawnBonus[7 - r];
                     } else {
                         for (int lookAheadRow = r + 1; lookAheadRow <= 7; ++lookAheadRow) {
-                            if ((c > 0 && board.getPiece({lookAheadRow, c - 1}) && board.getPiece({lookAheadRow, c - 1})->type() == PT_PAWN && board.getPiece({lookAheadRow, c - 1})->getColor() == WHITE) ||
-                                (board.getPiece({lookAheadRow, c}) && board.getPiece({lookAheadRow, c})->type() == PT_PAWN && board.getPiece({lookAheadRow, c})->getColor() == WHITE) ||
-                                (c < 7 && board.getPiece({lookAheadRow, c + 1}) && board.getPiece({lookAheadRow, c + 1})->type() == PT_PAWN && board.getPiece({lookAheadRow, c + 1})->getColor() == WHITE)) {
+                            if ((c > 0 && board.getPiece({lookAheadRow, c - 1}) && board.getPiece({lookAheadRow, c - 1})->getColor() == WHITE && board.getPiece({lookAheadRow, c-1})->type() == PT_PAWN) ||
+                                (board.getPiece({lookAheadRow, c}) && board.getPiece({lookAheadRow, c})->getColor() == WHITE && board.getPiece({lookAheadRow, c})->type() == PT_PAWN) ||
+                                (c < 7 && board.getPiece({lookAheadRow, c + 1}) && board.getPiece({lookAheadRow, c + 1})->getColor() == WHITE && board.getPiece({lookAheadRow, c+1})->type() == PT_PAWN)) {
                                 isPassed = false;
                                 break;
                             }
                         }
-                        if (isPassed) pawnStructureScore -= passedPawnBonus[r];
+                        if (isPassed) score -= passedPawnBonus[r];
                     }
                 }
             }
-            
-            score += pawnStructureScore;
-            if (!board.canWhiteCastleKingside() && !board.canWhiteCastleQueenside()) score -= 0.2;
-            if (!board.canBlackCastleKingside() && !board.canBlackCastleQueenside()) score += 0.2;
-            
-            return score;
+
+            score += evaluateKingSafety(board, WHITE, phaseFactor);
+            score += evaluateKingSafety(board, BLACK, phaseFactor);
+
+            score += evaluatePieceCoordination(board, WHITE);
+            score += evaluatePieceCoordination(board, BLACK);
+
+            return (playerColor == WHITE) ? score : -score;
         }
 
         void orderMoves(Board& b, vector<Move>& moves) const {
             vector<pair<int, Move>> scored;
             scored.reserve(moves.size());
+            Color playerColor = (moves.empty()) ? NONE : b.getPiece(moves[0].from)->getColor();
+            Board tempBoard = b;
+
+            if (playerColor == NONE) return; // Cannot determine player color if no moves.
+
+            Color opponentColor = (playerColor == WHITE) ? BLACK : WHITE;
+
             for (const auto& m : moves) {
+                int score = 0;
                 IMoveable* att = b.getPiece(m.from);
                 IMoveable* vic = b.getPiece(m.to);
                 int attv = att ? cpVal(att->type()) : 0;
                 int vicv = vic ? cpVal(vic->type())
                             : ((att && att->type()==PT_PAWN && m.to == b.getEnPassantTarget()) ? cpVal(PT_PAWN) : 0);
-                int promoBonus = (m.promotionPiece!=' ') ? 10000 : 0;
-                int score = promoBonus + vicv*100 - attv;
+                int promoBonus = (m.promotionPiece != ' ') ? 10000 : 0;
+                score = promoBonus + vicv*100 - attv;
+                tempBoard.makeMove(m);
+                if (tempBoard.isKingInCheck(opponentColor)) {
+                    score += 5000;
+                }
+                tempBoard.unmakeMove();
                 scored.push_back({score, m});
             }
             stable_sort(scored.begin(), scored.end(), [](const auto& a, const auto& b){ return a.first > b.first; });
-            for (size_t i=0;i<moves.size();++i) 
+
+            for (size_t i  =0; i < moves.size(); ++i) 
                 moves[i] = scored[i].second;
         }
 
-        double quiescenceSearch(double alpha, double beta, Color playerColor, Board& currentBoard) {
-            double stand_pat = evaluatePosition(currentBoard);
-            if (playerColor == WHITE) {
-                if (stand_pat >= beta) 
-                    return beta;
-                if (alpha < stand_pat) 
-                    alpha = stand_pat;
-            } else {
-                if (stand_pat <= alpha) 
-                    return alpha;
-                if (beta > stand_pat) 
-                    beta = stand_pat;
-            }
 
-            vector<Move> captures = currentBoard.getAllLegalMoves(playerColor, true);
-            orderMoves(currentBoard, captures);
+        void forcingMovesOnly(Color playerColor, Board& currentBoard, vector<Move>& validMoves, vector<Move>& forcingMoves) {
+            Color opponentColor = (playerColor == WHITE) ? BLACK : WHITE;
 
-            for (const auto& move : captures) {
+            for (auto& move : validMoves) {
+                bool isCapture = currentBoard.getPiece(move.to) != nullptr || (currentBoard.getPiece(move.from)->type() == PT_PAWN && move.to == currentBoard.getEnPassantTarget());
+                if (isCapture) {
+                    forcingMoves.push_back(move);
+                    continue;
+                }
+
                 currentBoard.makeMove(move);
-                double score = quiescenceSearch(alpha, beta, (playerColor == WHITE) ? BLACK : WHITE, currentBoard);
+                if (currentBoard.isKingInCheck(opponentColor)){
+                    forcingMoves.push_back(move);
+                }
+                currentBoard.unmakeMove();
+            }            
+        }
+
+        double quiescenceSearch(double alpha, double beta, Color playerColor, Board& currentBoard) {
+            double stand_pat = evaluatePosition(currentBoard, playerColor);
+            if (stand_pat >= beta) 
+                return beta;
+            if (alpha < stand_pat) 
+                alpha = stand_pat;
+            vector<Move> forcingMoves;
+            vector<Move> validMoves = currentBoard.getAllLegalMoves(playerColor);
+            forcingMovesOnly(playerColor, currentBoard,validMoves, forcingMoves);
+            orderMoves(currentBoard, forcingMoves);
+
+            for (const auto& move : forcingMoves) {
+                currentBoard.makeMove(move);
+                double score = -quiescenceSearch(-beta, -alpha, (playerColor == WHITE) ? BLACK : WHITE, currentBoard);
                 currentBoard.unmakeMove();
 
-                if (playerColor == WHITE) {
-                    if (score >= beta) 
-                        return beta;
-                    if (score > alpha) 
-                        alpha = score;
-                } else {
-                    if (score <= alpha) 
-                        return alpha;
-                    if (score < beta)  
-                        beta = score;
-                }
+                if (score >= beta) 
+                    return beta;
+                
+                if (score > alpha)
+                    alpha = score;
             }
-            return (playerColor == WHITE) ? alpha : beta;
+            return alpha;
         }
 
         double minimax(int depth, Color playerColor, double alpha, double beta, Board& currentBoard) {
@@ -1078,57 +1402,59 @@ class Engine {
                 if (storedFlag == UPPERBOUND && storedScore <= alpha) return alpha;
             }
 
-            if (depth == 0) 
+            if (depth == 0)
                 return quiescenceSearch(alpha, beta, playerColor, currentBoard);
 
-            vector<Move> moves = currentBoard.getAllLegalMoves(playerColor, false);
+            if (depth >= 3 && !currentBoard.isKingInCheck(playerColor)) {
+                currentBoard.makeNullMove();
+                Color opponentColor = (playerColor == WHITE) ? BLACK : WHITE;
+                double nullScore = -minimax(depth - 3, opponentColor, -beta, -beta + 1, currentBoard);
+                currentBoard.unmakeNullMove();
+
+                if (nullScore >= beta) {
+                    return beta;
+                }
+            }
+
+            vector<Move> moves = currentBoard.getAllLegalMoves(playerColor);
             if (moves.empty()) {
-                if (currentBoard.isKingInCheck(playerColor)) 
-                    return (playerColor == WHITE) ? -10000.0 : 10000.0;
+                if (currentBoard.isKingInCheck(playerColor))
+                    return -10000.0 + (5 - depth);
                 return 0.0;
             }
 
             orderMoves(currentBoard, moves);
 
             Move bestMove = moves[0];
-            double bestValue = (playerColor == WHITE) ? -1e9 : 1e9;
             TTFlag flag = UPPERBOUND;
 
+            bool isFirstMove = true;
             for (const auto& move : moves) {
                 currentBoard.makeMove(move);
-                double eval = minimax(depth - 1, (playerColor == WHITE) ? BLACK : WHITE, alpha, beta, currentBoard);
-                currentBoard.unmakeMove();
+                double eval;
 
-                if (playerColor == WHITE) {
-                    if (eval > bestValue) { 
-                        bestValue = eval; 
-                        bestMove = move; 
-                    }
-                    if (bestValue > alpha) { 
-                        alpha = bestValue; 
-                        flag = EXACT; 
-                    }
-                    if (alpha >= beta) { 
-                        tt.store(key, depth, beta, LOWERBOUND, bestMove); 
-                        return beta; 
-                    }
+                if (isFirstMove) {
+                    eval = -minimax(depth - 1, (playerColor == WHITE) ? BLACK : WHITE, -beta, -alpha, currentBoard);
+                    isFirstMove = false;
                 } else {
-                    if (eval < bestValue) { 
-                        bestValue = eval; 
-                        bestMove = move; 
-                    }
-                    if (bestValue < beta)  { 
-                        beta = bestValue;  
-                        flag = EXACT; 
-                    }
-                    if (beta <= alpha) { 
-                        tt.store(key, depth, alpha, UPPERBOUND, bestMove); 
-                        return alpha; 
+                    eval = -minimax(depth - 1, (playerColor == WHITE) ? BLACK : WHITE, -alpha - 1, -alpha, currentBoard);
+                    if (eval > alpha && eval < beta) {
+                        eval = -minimax(depth - 1, (playerColor == WHITE) ? BLACK : WHITE, -beta, -alpha, currentBoard);
                     }
                 }
+
+                currentBoard.unmakeMove();
+                if (eval >= beta) {
+                    tt.store(key, depth, beta, LOWERBOUND, move);
+                    return beta;
+                } else if (eval > alpha) {
+                    alpha = eval;
+                    flag = EXACT;
+                    bestMove = move;
+                }
             }
-            tt.store(key, depth, bestValue, flag, bestMove);
-            return bestValue;
+            tt.store(key, depth, alpha, flag, bestMove);
+            return alpha;
         }
 
     public:
@@ -1136,16 +1462,16 @@ class Engine {
 
         Move findBestMove(Color playerColor, int maxDepth) {
             Board& initialBoard = game.getBoardForEngine();
-            vector<Move> moves = initialBoard.getAllLegalMoves(playerColor, false);
+            vector<Move> moves = initialBoard.getAllLegalMoves(playerColor);
             if (moves.empty()) return {{-1,-1},{-1,-1}, ' '};
 
             Move bestMove = moves[0];
-            double bestValue = (playerColor == WHITE) ? -1e9 : 1e9;
+            double bestValue = -1e9;
 
             for (int depth = 1; depth <= maxDepth; depth++) {
                 orderMoves(initialBoard, moves);
 
-                double currentBestForDepth = (playerColor == WHITE) ? -1e9 : 1e9;
+                double currentBestForDepth = -1e9;
                 Move currentBestMoveForDepth = bestMove; 
                 vector<future<pair<double, Move>>> futures;
 
@@ -1153,7 +1479,7 @@ class Engine {
                 auto searchTask = [this, playerColor, depth](Move m, const Board& board) -> pair<double, Move> {
                     Board thread_local_board(board); 
                     thread_local_board.makeMove(m);
-                    double score = minimax(depth - 1,
+                    double score = -minimax(depth - 1,
                                         (playerColor == WHITE) ? BLACK : WHITE,
                                         -1e9, 1e9,
                                         thread_local_board); 
@@ -1171,7 +1497,7 @@ class Engine {
                     double v = result.first;
                     const Move& m = result.second;
 
-                    if ((playerColor == WHITE && v > currentBestForDepth) || (playerColor == BLACK && v < currentBestForDepth)) {
+                    if (v > currentBestForDepth) {
                         currentBestForDepth = v;
                         currentBestMoveForDepth = m;
                     }
@@ -1181,79 +1507,97 @@ class Engine {
                 bestMove = currentBestMoveForDepth;
             }
             std::system("cls");
-            cout << "Evaluation: " << bestValue << '\n';
+            cout << "AI played: "<< game.moveToString(bestMove) << " | Evaluation: " << ((playerColor == BLACK) ? -bestValue : bestValue) << '\n';
             return bestMove;
         }
 };
 
-void Game::run() {
-    while(true) {
-        board.display();
+void Game::humanTurn() {
+    cout << (currentPlayer == WHITE ? "White" : "Black") << "'s turn. Enter your move: ";
+    string moveStr;
+    if (!(cin >> moveStr) || moveStr == "exit") 
+        exit(0);
+
+    Move move = parseMove(moveStr);
+    IMoveable* piece = board.getPiece(move.from);
+    if (piece && piece->type() == PT_PAWN) {
+        int promotionRank = (piece->getColor() == WHITE) ? 0 : 7;
+        if (move.to.row == promotionRank && move.promotionPiece == ' ') {
+            cout << "Promote to (Q, R, B, N): ";
+            char p; 
+            cin >> p;
+            move.promotionPiece = (char)tolower((unsigned char)p);
+        }
+    }
+
+    vector<Move> legalMoves = board.getAllLegalMoves(currentPlayer);
+    bool isLegal = false;
+    for(const auto& legalMove : legalMoves) {
+        if (legalMove.from == move.from && legalMove.to == move.to) {
+            if (legalMove.promotionPiece == ' ' || legalMove.promotionPiece == move.promotionPiece) {
+                isLegal = true;
+                move.promotionPiece = legalMove.promotionPiece;
+                break;
+            }
+        }
+    }
+
+    if (isLegal) {
+        board.makeMove(move);
+        currentPlayer = (currentPlayer == WHITE) ? BLACK : WHITE;
+        std::system("cls");
+    } else {
+        cout << "Invalid or illegal move.\n";
+    }
+}
+
+void Game::engineTurn(int depth) {
+    cout << (currentPlayer == WHITE ? "White" : "Black") << "'s turn. AI is thinking...\n";
+    Move bestMove = engine->findBestMove(currentPlayer, depth);
+    if(bestMove.from.row != -1) {
+        board.makeMove(bestMove);
+        currentPlayer = (currentPlayer == WHITE) ? BLACK : WHITE;
+    } else {
+        cout << "AI has no moves.\n";
+    }
+}
+
+void Game::run(int depth) {
+    string playerChoice;
+    cout << "Pick a color: ";
+    cin >> playerChoice;
+    for(auto& c : playerChoice)
+        c = (char)tolower(c);
+
+    Color _playerChoice = (playerChoice == "white" || playerChoice == "w") ? WHITE : BLACK;
+    
+    std::system("cls");
+    cout << "You are playing as " << (_playerChoice == WHITE ? "White" : "Black") << ". Type 'exit' to quit.\n";
+
+    while (true) {
+        board.display( _playerChoice == BLACK);
 
         if (isCheckmate(currentPlayer)) {
-            cout << (currentPlayer == WHITE ? "Black" : "White") << " wins by checkmate!\n";
+            cout << (currentPlayer == WHITE ? "White" : "Black") << " is checkmated. ";
+            break;
+        } else if (isStalemate(currentPlayer)) {
+            cout << "Stalemate! It's a draw.\n";
+            break;
+        } else if (isDrawByInsufficientMaterial()) {
+            cout << "Draw by insufficient material.\n";
             break;
         }
-        if (isStalemate(currentPlayer)) {
-            cout << "The game is a draw by stalemate.\n";
-            break;
-        }
-        if (isDrawByInsufficientMaterial()) {
-            cout << "The game is a draw by insufficient material.\n";
-            break;
-        }
 
-        if (currentPlayer == WHITE) {
-            cout << "White's turn. Enter your move (e.g., e2e4 or e7e8q): ";
-            string moveStr;
-            if (!(cin >> moveStr) || moveStr == "exit") 
-                break;
-
-            Move move = parseMove(moveStr);
-            IMoveable* piece = board.getPiece(move.from);
-            if (piece && piece->type() == PT_PAWN) {
-                int promotionRank = (piece->getColor() == WHITE) ? 0 : 7;
-                if (move.to.row == promotionRank && move.promotionPiece == ' ') {
-                    cout << "Promote to (Q, R, B, N): ";
-                    char p; cin >> p;
-                    move.promotionPiece = (char)tolower((unsigned char)p);
-                }
-            }
-
-            vector<Move> legalMoves = board.getAllLegalMoves(currentPlayer, false);
-            bool isLegal = false;
-            for(const auto& legalMove : legalMoves) {
-                if (legalMove.from == move.from && legalMove.to == move.to) {
-                    if (legalMove.promotionPiece == ' ' || legalMove.promotionPiece == move.promotionPiece) {
-                        isLegal = true;
-                        move.promotionPiece = legalMove.promotionPiece;
-                        break;
-                    }
-                }
-            }
-
-            if (isLegal) {
-                board.makeMove(move);
-                currentPlayer = BLACK;
-                std::system("cls");
-            } else {
-                cout << "Invalid or illegal move.\n";
-            }
+        if (currentPlayer == _playerChoice) {
+            humanTurn();
         } else {
-            cout << "Black's turn (AI is thinking...)\n";
-            Move bestMove = engine->findBestMove(BLACK, 5);
-            if(bestMove.from.row != -1) {
-                board.makeMove(bestMove);
-                currentPlayer = WHITE;
-            } else {
-                cout << "AI has no moves.\n";
-            }
+            engineTurn(depth);
         }
     }
 }
 
 int main() {
     Game game;
-    game.run();
+    game.run(5); // Set search depth here
     return 0;
 }

@@ -6,6 +6,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include "chess/eval.hpp"
 #include "chess/movegen.hpp"
 #include "chess/position.hpp"
 #include "chess/bitboard.hpp"
@@ -273,6 +274,20 @@ int main() {
         CHECK(perft(pf, 2) == 191);
         CHECK(perft(pf, 3) == 2812);
         CHECK(perft(pf, 4) == 43238);
+    }
+
+    // ---- evaluation ----
+    {   // start position is perfectly symmetric -> exactly 0
+        Position e; e.set_startpos();
+        CHECK(evaluate(e) == 0);
+    }
+    {   // black is missing its queen; white to move is up ~900
+        Position e; e.set_fen("rnb1kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+        CHECK(evaluate(e) > 800);
+    }
+    {   // white is missing a rook; black to move is up ~500 (side-to-move view)
+        Position e; e.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/1NBQKBNR b KQk - 0 1");
+        CHECK(evaluate(e) > 400);
     }
 
     if (g_failures == 0)

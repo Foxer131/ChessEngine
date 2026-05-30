@@ -25,8 +25,8 @@ struct TTEntry {
     std::uint64_t key   = 0;
     Move          move  = MOVE_NONE;
     std::int16_t  score = 0;
-    std::int8_t   depth = -1;
-    std::uint8_t  bound = BOUND_NONE;
+    std::int8_t   depth = 0;       // all-zero default keeps g_tt in .bss (no 16MB
+    std::uint8_t  bound = BOUND_NONE;  // in the binary); empty slots are found via key mismatch
 };
 
 constexpr std::size_t TT_SIZE = 1 << 20;       // ~16 MB, power of two

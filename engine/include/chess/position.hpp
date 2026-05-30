@@ -80,14 +80,22 @@ public:
     // ---- make / unmake (apply and undo a move) ----
     // State that a move destroys and unmake must restore.
     struct Undo {
-        Piece  captured       = NO_PIECE;  // piece taken (incl. en-passant), or NO_PIECE
-        int    castlingRights = NO_CASTLING;
-        Square epSquare       = SQ_NONE;
-        int    halfmoveClock  = 0;
-        int    fullmoveNumber = 1;
+        Piece         captured       = NO_PIECE;  // piece taken (incl. en-passant)
+        int           castlingRights = NO_CASTLING;
+        Square        epSquare       = SQ_NONE;
+        int           halfmoveClock  = 0;
+        int           fullmoveNumber = 1;
+        std::uint64_t key            = 0;         // zobrist key before the move
     };
     void make_move(Move m, Undo& u);          // apply m, recording undo info in u
     void unmake_move(Move m, const Undo& u);  // restore the position before m
+
+    // Null move (pass the turn) - used by null-move pruning. Never while in check.
+    void make_null_move(Undo& u);
+    void unmake_null_move(const Undo& u);
+
+    // Zobrist hash of the whole position, maintained incrementally.
+    std::uint64_t key() const { return key_; }
 
     // ---- board edits (fill in - in position.cpp) ----
     void put_piece(Piece pc, Square s);   // place pc on s (s must be empty)
@@ -105,6 +113,7 @@ private:
     Square   epSquare_               = SQ_NONE;     // en-passant target, or SQ_NONE
     int      halfmoveClock_          = 0;
     int      fullmoveNumber_         = 1;
+    std::uint64_t key_               = 0;   // zobrist hash; see key()
 };
 
 }

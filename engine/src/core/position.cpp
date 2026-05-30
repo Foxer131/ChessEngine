@@ -2,12 +2,42 @@
 #include "chess/attacks.hpp"
 
 #include <cctype>
+#include <cstdint>
 #include <sstream>
 #include <string>
 
 namespace chess {
 
 namespace {
+
+// --- Zobrist hashing ---------------------------------------------------------
+// Random 64-bit keys XOR-folded into a single position hash. Each toggle (a
+// piece on a square, the side, a castling-rights state, an ep file) is its own
+// key, so flipping any feature is a single XOR - which is what lets us maintain
+// the key incrementally in make/unmake.
+struct Zobrist {
+    std::uint64_t piece[PIECE_NB][SQUARE_NB];
+    std::uint64_t castling[16];   // indexed by the 4-bit rights mask
+    std::uint64_t epFile[FILE_NB];
+    std::uint64_t side;           // XOR'd in when black is to move
+};
+
+Zobrist make_zobrist() {
+    Zobrist z{};
+    std::uint64_t s = 0x9E3779B97F4A7C15ULL;          // fixed seed -> deterministic
+    auto next = [&s]() {
+        s ^= s >> 12; s ^= s << 25; s ^= s >> 27;
+        return s * 0x2545F4914F6CDD1DULL;
+    };
+    for (int p = 0; p < PIECE_NB; ++p)
+        for (int sq = 0; sq < SQUARE_NB; ++sq) z.piece[p][sq] = next();
+    for (int i = 0; i < 16; ++i)       z.castling[i] = next();
+    for (int f = 0; f < FILE_NB; ++f)  z.epFile[f]   = next();
+    z.side = next();
+    return z;
+}
+
+const Zobrist Z = make_zobrist();
 
 // Map a FEN piece letter to a Piece. The case carries the color (uppercase =
 // white, lowercase = black); the letter carries the type. 'N' -> W_KNIGHT,
@@ -65,10 +95,12 @@ void Position::put_piece(Piece pc, Square s) {
     board_[s] = pc;
     set(byColor_[color_of(pc)], s);
     set(byType_[type_of(pc)], s);
+    key_ ^= Z.piece[pc][s];
 }
 
 void Position::remove_piece(Square s) {
     Piece pc = board_[s];
+    key_ ^= Z.piece[pc][s];
     clear(byColor_[color_of(pc)], s);
     clear(byType_[type_of(pc)], s);
     board_[s] = NO_PIECE;
@@ -124,6 +156,7 @@ void Position::make_move(Move m, Undo& u) {
     u.epSquare       = epSquare_;
     u.halfmoveClock  = halfmoveClock_;
     u.fullmoveNumber = fullmoveNumber_;
+    u.key            = key_;
 
     bool isCapture = false;
 
@@ -160,16 +193,20 @@ void Position::make_move(Move m, Undo& u) {
 
     // Update castling rights (king/rook moved, or a rook was captured).
     castlingRights_ &= castle_mask(from) & castle_mask(to);
+    key_ ^= Z.castling[u.castlingRights] ^ Z.castling[castlingRights_];
 
     // En-passant target exists only right after a double pawn push.
+    if (u.epSquare != SQ_NONE) key_ ^= Z.epFile[file_of(u.epSquare)];
     epSquare_ = SQ_NONE;
     if (type_of(pc) == PAWN && (to - from == 16 || from - to == 16))
         epSquare_ = Square((from + to) / 2);
+    if (epSquare_ != SQ_NONE) key_ ^= Z.epFile[file_of(epSquare_)];
 
     // 50-move clock: reset on pawn moves and captures, else advance.
     halfmoveClock_ = (type_of(pc) == PAWN || isCapture) ? 0 : halfmoveClock_ + 1;
 
     if (us == BLACK) ++fullmoveNumber_;
+    key_ ^= Z.side;
     sideToMove_ = them;
 }
 
@@ -215,6 +252,36 @@ void Position::unmake_move(Move m, const Undo& u) {
     epSquare_       = u.epSquare;
     halfmoveClock_  = u.halfmoveClock;
     fullmoveNumber_ = u.fullmoveNumber;
+    key_            = u.key;
+}
+
+// A null move just passes the turn (used by null-move pruning): no piece moves,
+// the en-passant right is dropped, side flips. Never call it while in check.
+void Position::make_null_move(Undo& u) {
+    u.captured       = NO_PIECE;
+    u.castlingRights = castlingRights_;
+    u.epSquare       = epSquare_;
+    u.halfmoveClock  = halfmoveClock_;
+    u.fullmoveNumber = fullmoveNumber_;
+    u.key            = key_;
+
+    if (epSquare_ != SQ_NONE) {
+        key_ ^= Z.epFile[file_of(epSquare_)];
+        epSquare_ = SQ_NONE;
+    }
+    ++halfmoveClock_;
+    if (sideToMove_ == BLACK) ++fullmoveNumber_;
+    key_ ^= Z.side;
+    sideToMove_ = ~sideToMove_;
+}
+
+void Position::unmake_null_move(const Undo& u) {
+    sideToMove_     = ~sideToMove_;
+    castlingRights_ = u.castlingRights;
+    epSquare_       = u.epSquare;
+    halfmoveClock_  = u.halfmoveClock;
+    fullmoveNumber_ = u.fullmoveNumber;
+    key_            = u.key;
 }
 
 // -----------------------------------------------------------------------------
@@ -237,6 +304,11 @@ void Position::set_startpos() {
     epSquare_       = SQ_NONE;
     halfmoveClock_  = 0;
     fullmoveNumber_ = 1;
+
+    // Fold the non-piece state into the key (piece keys were added by put_piece).
+    if (sideToMove_ == BLACK) key_ ^= Z.side;
+    key_ ^= Z.castling[castlingRights_];
+    if (epSquare_ != SQ_NONE) key_ ^= Z.epFile[file_of(epSquare_)];
 }
 
 // Load a position from a FEN string. A FEN has 6 space-separated fields:
@@ -289,6 +361,11 @@ void Position::set_fen(const std::string& fen) {
     // Fields 5 & 6: move clocks.
     halfmoveClock_  = half;
     fullmoveNumber_ = full;
+
+    // Fold the non-piece state into the key (piece keys were added by put_piece).
+    if (sideToMove_ == BLACK) key_ ^= Z.side;
+    key_ ^= Z.castling[castlingRights_];
+    if (epSquare_ != SQ_NONE) key_ ^= Z.epFile[file_of(epSquare_)];
 }
 
 // -----------------------------------------------------------------------------

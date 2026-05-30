@@ -78,7 +78,7 @@ static std::string snapshot(const Position& p) {
     os << p.to_string()
        << int(p.side_to_move())  << '|' << p.castling_rights() << '|'
        << int(p.ep_square())     << '|' << p.halfmove_clock()  << '|'
-       << p.fullmove_number();
+       << p.fullmove_number()    << '|' << p.key();
     return os.str();
 }
 
@@ -249,6 +249,32 @@ int main() {
             pp.unmake_move(c.move, u);
             CHECK(snapshot(pp) == before);
         }
+    }
+
+    // ---- zobrist keys ----
+    {   // key changes on a move and is restored by unmake (snapshot covers more)
+        Position a; a.set_startpos();
+        auto k0 = a.key();
+        CHECK(k0 != 0);
+        Position::Undo u;
+        a.make_move(Move::make(SQ_E2, SQ_E4), u);
+        CHECK(a.key() != k0);
+        a.unmake_move(Move::make(SQ_E2, SQ_E4), u);
+        CHECK(a.key() == k0);
+    }
+    {   // transposition: two move orders reaching the same position share a key
+        Position a; a.set_startpos();
+        Position b; b.set_startpos();
+        Position::Undo u;
+        a.make_move(Move::make(SQ_G1, SQ_F3), u);   // Nf3 Nf6 Nc3 Nc6
+        a.make_move(Move::make(SQ_G8, SQ_F6), u);
+        a.make_move(Move::make(SQ_B1, SQ_C3), u);
+        a.make_move(Move::make(SQ_B8, SQ_C6), u);
+        b.make_move(Move::make(SQ_B1, SQ_C3), u);   // Nc3 Nc6 Nf3 Nf6
+        b.make_move(Move::make(SQ_B8, SQ_C6), u);
+        b.make_move(Move::make(SQ_G1, SQ_F3), u);
+        b.make_move(Move::make(SQ_G8, SQ_F6), u);
+        CHECK(a.key() == b.key());
     }
 
     // ---- perft: the move-generation correctness gate ----

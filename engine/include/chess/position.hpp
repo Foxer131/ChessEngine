@@ -27,6 +27,7 @@ public:
     // ---- setup (provided in position.cpp) ----
     void reset();         // empty the board (named reset, not clear - see note below)
     void set_startpos();  // standard chess starting position
+    void set_fen(const std::string& fen);  // load a position from a FEN string
 
     // The piece sitting on square s (NO_PIECE if empty).
     Piece piece_on(Square s) const {
@@ -51,6 +52,12 @@ public:
     // Squares occupied by color c AND type pt (e.g. white knights).
     Bitboard pieces(Color c, PieceType pt) const { return byColor_[c] & byType_[pt]; }
 
+    // ---- extra state (provided getters) ----
+    int    castling_rights() const { return castlingRights_; } // bitmask of CastlingRights
+    Square ep_square() const       { return epSquare_; }       // SQ_NONE if no en-passant
+    int    halfmove_clock() const  { return halfmoveClock_; }  // for the 50-move rule
+    int    fullmove_number() const { return fullmoveNumber_; } // starts at 1
+
     // ---- board edits (fill in - in position.cpp) ----
     void put_piece(Piece pc, Square s);   // place pc on s (s must be empty)
     void remove_piece(Square s);          // remove whatever is on s
@@ -63,6 +70,10 @@ private:
     Bitboard byType_[PIECE_TYPE_NB]  = {}; // index by PieceType (PAWN..KING; 0 unused)
     Piece    board_[SQUARE_NB]       = {}; // mailbox; NO_PIECE (=0) everywhere by default
     Color    sideToMove_             = WHITE;
+    int      castlingRights_         = NO_CASTLING; // bitmask of CastlingRights
+    Square   epSquare_               = SQ_NONE;     // en-passant target, or SQ_NONE
+    int      halfmoveClock_          = 0;
+    int      fullmoveNumber_         = 1;
 };
 
 }

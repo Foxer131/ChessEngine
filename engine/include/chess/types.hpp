@@ -58,6 +58,19 @@ enum Piece : int {
 };
 
 // -----------------------------------------------------------------------------
+// Castling rights: a 4-bit set, one bit per side+wing. They OR together, so a
+// position's rights are the union of the bits below. NO_CASTLING = empty set.
+// -----------------------------------------------------------------------------
+enum CastlingRights : int {
+    NO_CASTLING = 0,
+    WHITE_OO    = 1,   // white king-side  (O-O)
+    WHITE_OOO   = 2,   // white queen-side (O-O-O)
+    BLACK_OO    = 4,   // black king-side
+    BLACK_OOO   = 8,   // black queen-side
+    ANY_CASTLING = WHITE_OO | WHITE_OOO | BLACK_OO | BLACK_OOO   // 15
+};
+
+// -----------------------------------------------------------------------------
 // Files (columns a..h) and Ranks (rows 1..8).
 // -----------------------------------------------------------------------------
 enum File : int {

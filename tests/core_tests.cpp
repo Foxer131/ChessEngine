@@ -6,6 +6,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include "chess/movegen.hpp"
 #include "chess/position.hpp"
 #include "chess/bitboard.hpp"
 #include "chess/move.hpp"
@@ -247,6 +248,31 @@ int main() {
             pp.unmake_move(c.move, u);
             CHECK(snapshot(pp) == before);
         }
+    }
+
+    // ---- perft: the move-generation correctness gate ----
+    {   // standard start position (reference values from the chess programming wiki)
+        Position pf; pf.set_startpos();
+        CHECK(perft(pf, 1) == 20);
+        CHECK(perft(pf, 2) == 400);
+        CHECK(perft(pf, 3) == 8902);
+        CHECK(perft(pf, 4) == 197281);
+        CHECK(perft(pf, 5) == 4865609);
+    }
+    {   // "Kiwipete" - dense with castling, en passant, pins; catches subtle bugs
+        Position pf;
+        pf.set_fen("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1");
+        CHECK(perft(pf, 1) == 48);
+        CHECK(perft(pf, 2) == 2039);
+        CHECK(perft(pf, 3) == 97862);
+    }
+    {   // position 3 (CPW) - tricky en-passant / promotion interactions
+        Position pf;
+        pf.set_fen("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1");
+        CHECK(perft(pf, 1) == 14);
+        CHECK(perft(pf, 2) == 191);
+        CHECK(perft(pf, 3) == 2812);
+        CHECK(perft(pf, 4) == 43238);
     }
 
     if (g_failures == 0)

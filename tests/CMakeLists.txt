@@ -1,17 +1,18 @@
 # =============================================================================
-# Tests. The single most important test for a chess engine is PERFT:
-# enumerate all legal moves to a fixed depth from known positions and compare
-# node counts against published reference values. This catches almost every
-# move-generation bug. Add a perft suite first, before search/eval tests.
+# Tests. A single no-dependency executable (core_tests) linked against
+# chess_core, registered with CTest. PERFT suites will join this later as the
+# move generator comes online.
 #
-# Test framework (doctest or Catch2) will be fetched into third_party/ or via
-# FetchContent once we start writing tests.
+# Sources are auto-discovered, and the target only builds once chess_core
+# exists (i.e. the engine has sources).
 # =============================================================================
 
-# Example shape (uncomment once a framework + sources exist):
-#
-# add_executable(unit_tests
-#     perft_tests.cpp
-#     movegen_tests.cpp)
-# target_link_libraries(unit_tests PRIVATE chess_core)
-# add_test(NAME unit_tests COMMAND unit_tests)
+file(GLOB TEST_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
+
+if(TEST_SOURCES AND TARGET chess_core)
+    add_executable(core_tests ${TEST_SOURCES})
+    target_link_libraries(core_tests PRIVATE chess_core)
+    add_test(NAME core_tests COMMAND core_tests)
+else()
+    message(STATUS "tests: skipped (need chess_core sources + a test .cpp).")
+endif()

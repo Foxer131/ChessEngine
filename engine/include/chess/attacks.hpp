@@ -18,4 +18,10 @@ Bitboard knight_attacks(Square s);
 Bitboard king_attacks(Square s);
 Bitboard pawn_attacks(Color c, Square s);
 
+// Sliding pieces: attacks depend on the occupied squares (blockers), resolved
+// via magic bitboards. Pass the full board occupancy.
+Bitboard bishop_attacks(Square s, Bitboard occupied);
+Bitboard rook_attacks(Square s, Bitboard occupied);
+Bitboard queen_attacks(Square s, Bitboard occupied);
+
 } // namespace chess

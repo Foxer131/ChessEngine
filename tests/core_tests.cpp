@@ -102,6 +102,25 @@ int main() {
     CHECK(pawn_attacks(WHITE, SQ_A2) == square_bb(SQ_B3));   // a-pawn: only one diagonal
     CHECK(pawn_attacks(BLACK, SQ_E5) == (square_bb(SQ_D4) | square_bb(SQ_F4)));
 
+    // ---- sliding attacks (magic bitboards) ----
+    CHECK(popcount(rook_attacks(SQ_A1, 0))   == 14);  // empty board, corner
+    CHECK(popcount(bishop_attacks(SQ_C1, 0))  == 7);
+    CHECK(popcount(queen_attacks(SQ_D4, 0))   == 27);
+    {   // rook on a1 blocked by a piece on a4 (file) and c1 (rank)
+        Bitboard occ = square_bb(SQ_A4) | square_bb(SQ_C1);
+        Bitboard exp = square_bb(SQ_A2) | square_bb(SQ_A3) | square_bb(SQ_A4)
+                     | square_bb(SQ_B1) | square_bb(SQ_C1);
+        CHECK(rook_attacks(SQ_A1, occ) == exp);       // stops on (and includes) the blocker
+    }
+    {   // bishop on d4 blocked at f6 (NE) and b2 (SW)
+        Bitboard occ = square_bb(SQ_F6) | square_bb(SQ_B2);
+        Bitboard a = bishop_attacks(SQ_D4, occ);
+        CHECK((a & square_bb(SQ_F6)) != 0);           // blocker is attacked
+        CHECK((a & square_bb(SQ_G7)) == 0);           // square beyond it is not
+        CHECK((a & square_bb(SQ_B2)) != 0);
+        CHECK((a & square_bb(SQ_A1)) == 0);
+    }
+
     if (g_failures == 0)
         std::cout << "core position checks passed\n";
     else

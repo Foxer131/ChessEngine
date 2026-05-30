@@ -32,13 +32,19 @@ Bitboard compute_knight(Square s) {
 // A king on `s` reaches every adjacent square: (df,dr) in {-1,0,+1}^2 minus (0,0).
 Bitboard compute_king(Square s) {
     const int f = file_of(s), r = rank_of(s);
+    
     Bitboard b = 0;
+    
     for (int df = -1; df <= 1; ++df)
-        for (int dr = -1; dr <= 1; ++dr) {
-            if (df == 0 && dr == 0) continue;
+        
+    for (int dr = -1; dr <= 1; ++dr) {
+            if (df == 0 && dr == 0) 
+                continue;
+            
             if (on_board(f + df, r + dr))
                 set(b, make_square(File(f + df), Rank(r + dr)));
         }
+    
     return b;
 }
 

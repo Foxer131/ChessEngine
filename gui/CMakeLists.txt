@@ -24,5 +24,17 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-# add_executable(chess_gui src/main.cpp)
-# target_link_libraries(chess_gui PRIVATE Qt::Widgets)
+add_executable(chess_gui
+    src/main.cpp
+    src/MainWindow.cpp
+    src/BoardWidget.cpp
+    src/NewGameDialog.cpp
+    src/UciEngine.cpp
+    src/GuiBoard.cpp)
+
+target_link_libraries(chess_gui PRIVATE Qt::Widgets)
+
+# On Windows, mark as a GUI app (no console window) in Release.
+if(WIN32)
+    set_target_properties(chess_gui PROPERTIES WIN32_EXECUTABLE $<CONFIG:Release>)
+endif()

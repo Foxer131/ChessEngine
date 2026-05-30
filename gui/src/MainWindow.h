@@ -1,0 +1,53 @@
+#pragma once
+// =============================================================================
+// MainWindow - ties together the board model, the board widget, and the UCI
+// engine. Owns the game flow: human moves go to the board + engine; the engine
+// reply comes back asynchronously and is applied to the board.
+//
+// If no engine is loaded, the window falls back to "free play": the user can
+// move both colors, which is handy for exercising the board before the engine
+// exists.
+// =============================================================================
+
+#include <QMainWindow>
+#include <QStringList>
+#include "GuiBoard.h"
+
+class BoardWidget;
+class UciEngine;
+class QPlainTextEdit;
+
+class MainWindow : public QMainWindow {
+    Q_OBJECT
+public:
+    explicit MainWindow(QWidget* parent = nullptr);
+
+private slots:
+    void newGame();
+    void chooseEngine();
+    void onMoveRequested(int fromFile, int fromRank, int toFile, int toRank);
+    void onBestMove(const QString& uci);
+    void onInfoLine(const QString& line);
+    void onEngineError(const QString& message);
+
+private:
+    void setupMenu();
+    void tryAutoLoadEngine();
+    void requestEngineMove();
+    bool engineToMove() const { return board_.sideToMove() != humanColor_; }
+    void log(const QString& s);
+    void updateStatus();
+
+    GuiBoard       board_;
+    BoardWidget*   boardView_ = nullptr;
+    UciEngine*     engine_ = nullptr;
+    QPlainTextEdit* logView_ = nullptr;
+
+    QString     enginePath_;
+    QStringList moves_;                 // game moves in UCI long algebraic
+    GuiBoard::Color humanColor_ = GuiBoard::Color::White;
+    bool useMovetime_ = false;
+    int  depth_ = 8;
+    int  movetimeMs_ = 1000;
+    bool gameActive_ = false;
+};

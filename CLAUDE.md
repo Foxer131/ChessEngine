@@ -32,12 +32,23 @@ separate process that drives it over UCI. CPU-only — see the GPU note below.
   `eval/` (HCE now, NNUE later), `uci/`.
 
 ## Build / test
-- Configure: `cmake --preset release` (or `debug`). Build: `cmake --build --preset release`.
+- **Toolchain (installed via MSYS2):** GCC + CMake + Ninja + Qt6 live in
+  `C:\msys64\mingw64\bin`. Prepend that to `PATH` before building:
+  `$env:Path = "C:\msys64\mingw64\bin;" + $env:Path`.
+- **CRITICAL — build in an ASCII-only path.** The source tree lives under
+  `...\João\...` (accented char) + OneDrive. Qt's `moc` cannot *create* files
+  under non-ASCII paths, so configure the build dir OUTSIDE the source tree:
+  `cmake -G Ninja -S . -B C:/chess_build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/msys64/mingw64`
+  then `cmake --build C:/chess_build`. Binaries land in `C:\chess_build\bin\`.
+  (CMakePresets put the build dir inside the source tree and will hit the moc
+  bug — don't use them on this machine until the project moves to an ASCII path.)
 - `compile_commands.json` is exported at the build dir for clangd.
 - Tests use CTest. **Perft is the primary correctness gate** for move gen.
-- Sources are listed explicitly in `engine/CMakeLists.txt` (no globbing) — add
-  files there as they're created. Targets are currently commented out / empty
-  placeholders until real sources exist.
+- Engine sources are auto-discovered via `CONFIGURE_DEPENDS` glob in
+  `engine/CMakeLists.txt`: just drop `.cpp` files under `engine/src/{core,
+  movegen,search,eval}/` and rebuild. The `engine` exe builds once
+  `engine/src/uci/main.cpp` exists; `bench` once `engine/bench/bench_main.cpp`
+  exists. Until then the engine targets are skipped and only the GUI builds.
 
 ## Build order (see docs/ROADMAP.md)
 Foundations → move generation (PERFT-correct FIRST) → search → eval → search

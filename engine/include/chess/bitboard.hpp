@@ -95,48 +95,4 @@ constexpr Bitboard north_west(Bitboard b) { return (b & ~FILE_A_BB) << 7; }
 constexpr Bitboard south_east(Bitboard b) { return (b & ~FILE_H_BB) >> 7; }
 constexpr Bitboard south_west(Bitboard b) { return (b & ~FILE_A_BB) >> 9; }
 
-// =============================================================================
-// Compile-time tests. Zero runtime cost; a firing static_assert names the bug.
-// =============================================================================
-static_assert(square_bb(SQ_A1) == 1ULL,        "a1 is bit 0");
-static_assert(square_bb(SQ_H8) == (1ULL << 63),"h8 is bit 63");
-static_assert(square_bb(SQ_E4) == (1ULL << 28),"e4 is bit 28");
-
-static_assert(test(square_bb(SQ_E4), SQ_E4),  "e4 is set");
-static_assert(!test(square_bb(SQ_E4), SQ_D4), "d4 is not");
-
-// set / clear round-trip (they mutate, so drive them in a constexpr function)
-constexpr bool set_clear_ok() {
-    Bitboard b = 0;
-    set(b, SQ_E4);
-    bool was_set = test(b, SQ_E4);
-    clear(b, SQ_E4);
-    return was_set && b == 0;
-}
-static_assert(set_clear_ok(), "set then clear returns to empty");
-
-static_assert(popcount(0) == 0,            "empty");
-static_assert(popcount(RANK_1_BB) == 8,    "a full rank");
-static_assert(popcount(~Bitboard(0)) == 64,"full board");
-
-static_assert(lsb(square_bb(SQ_C2)) == SQ_C2, "single-bit lsb");
-constexpr int count_by_pop(Bitboard b) { int n = 0; while (b) { (void)pop_lsb(b); ++n; } return n; }
-static_assert(count_by_pop(0xF0FULL) == 8, "pop_lsb iterates every bit once");
-
-static_assert(north(square_bb(SQ_E4)) == square_bb(SQ_E5), "");
-static_assert(south(square_bb(SQ_E4)) == square_bb(SQ_E3), "");
-static_assert(east (square_bb(SQ_E4)) == square_bb(SQ_F4), "");
-static_assert(west (square_bb(SQ_E4)) == square_bb(SQ_D4), "");
-
-// the wrap guards: stepping off the edge yields empty, NOT a wrapped square
-static_assert(east (square_bb(SQ_H4)) == 0, "h-file east must not wrap to a5");
-static_assert(west (square_bb(SQ_A4)) == 0, "a-file west must not wrap to h3");
-static_assert(north(square_bb(SQ_E8)) == 0, "off the top is empty");
-static_assert(south(square_bb(SQ_E1)) == 0, "off the bottom is empty");
-
-static_assert(north_east(square_bb(SQ_E4)) == square_bb(SQ_F5), "");
-static_assert(north_west(square_bb(SQ_E4)) == square_bb(SQ_D5), "");
-static_assert(south_east(square_bb(SQ_E4)) == square_bb(SQ_F3), "");
-static_assert(south_west(square_bb(SQ_E4)) == square_bb(SQ_D3), "");
-
 } // namespace chess

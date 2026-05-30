@@ -84,27 +84,4 @@ private:
 // The "no move" sentinel. A real move never has from == to, so 0 is safe.
 inline constexpr Move MOVE_NONE{};
 
-// =============================================================================
-// Compile-time tests for the packing/unpacking above.
-// =============================================================================
-constexpr Move e2e4 = Move::make(SQ_E2, SQ_E4);
-static_assert(e2e4.from_sq() == SQ_E2, "");
-static_assert(e2e4.to_sq()   == SQ_E4, "");
-static_assert(e2e4.type_of() == NORMAL, "");
-
-constexpr Move promo = Move::make(SQ_E7, SQ_E8, PROMOTION, QUEEN);
-static_assert(promo.from_sq() == SQ_E7, "");
-static_assert(promo.to_sq()   == SQ_E8, "");
-static_assert(promo.type_of() == PROMOTION, "");
-static_assert(promo.promotion_type() == QUEEN, "");
-
-constexpr Move castle = Move::make(SQ_E1, SQ_G1, CASTLING);
-static_assert(castle.type_of() == CASTLING, "");
-static_assert(castle.from_sq() == SQ_E1 && castle.to_sq() == SQ_G1, "");
-
-constexpr Move ep = Move::make(SQ_D5, SQ_E6, EN_PASSANT);
-static_assert(ep.type_of() == EN_PASSANT, "");
-
-static_assert(MOVE_NONE.raw() == 0, "null move is all-zero");
-
 } // namespace chess

@@ -44,6 +44,10 @@ separate process that drives it over UCI. CPU-only — see the GPU note below.
   bug — don't use them on this machine until the project moves to an ASCII path.)
 - `compile_commands.json` is exported at the build dir for clangd.
 - Tests use CTest. **Perft is the primary correctness gate** for move gen.
+- **File-purpose convention:** headers under `include/chess/` hold *definitions
+  only*; all tests live in `tests/core_tests.cpp` (a `compile_time` namespace of
+  `static_assert`s + runtime `CHECK`s in `main`). `engine/src/` holds only real
+  implementation. Don't reintroduce per-header `*_check.cpp` scaffolds.
 - Engine sources are auto-discovered via `CONFIGURE_DEPENDS` glob in
   `engine/CMakeLists.txt`: just drop `.cpp` files under `engine/src/{core,
   movegen,search,eval}/` and rebuild. The `engine` exe builds once

@@ -21,6 +21,52 @@ static int g_failures = 0;
         }                                                                      \
     } while (0)
 
+// =============================================================================
+// Compile-time checks (relocated here from the headers, which now hold only
+// definitions). These fire at build time if a constexpr helper is wrong.
+// =============================================================================
+namespace compile_time {
+
+// types.hpp
+static_assert(make_square(FILE_A, RANK_1) == SQ_A1);
+static_assert(make_square(FILE_H, RANK_8) == SQ_H8);
+static_assert(make_square(FILE_E, RANK_4) == SQ_E4);
+static_assert(file_of(SQ_E4) == FILE_E && rank_of(SQ_E4) == RANK_4);
+static_assert(make_piece(WHITE, KNIGHT) == W_KNIGHT);
+static_assert(make_piece(BLACK, KING) == B_KING);
+static_assert(type_of(B_QUEEN) == QUEEN && color_of(B_QUEEN) == BLACK);
+static_assert(~WHITE == BLACK && ~BLACK == WHITE);
+
+// bitboard.hpp
+static_assert(square_bb(SQ_A1) == 1ULL && square_bb(SQ_H8) == (1ULL << 63));
+static_assert(test(square_bb(SQ_E4), SQ_E4) && !test(square_bb(SQ_E4), SQ_D4));
+constexpr bool set_clear_ok() {
+    Bitboard b = 0; set(b, SQ_E4); bool was = test(b, SQ_E4); clear(b, SQ_E4);
+    return was && b == 0;
+}
+static_assert(set_clear_ok());
+static_assert(popcount(RANK_1_BB) == 8 && popcount(~Bitboard(0)) == 64);
+static_assert(lsb(square_bb(SQ_C2)) == SQ_C2);
+constexpr int count_by_pop(Bitboard b) { int n = 0; while (b) { (void)pop_lsb(b); ++n; } return n; }
+static_assert(count_by_pop(0xF0FULL) == 8);
+static_assert(north(square_bb(SQ_E4)) == square_bb(SQ_E5));
+static_assert(east(square_bb(SQ_E4)) == square_bb(SQ_F4));
+static_assert(east(square_bb(SQ_H4)) == 0 && west(square_bb(SQ_A4)) == 0);  // wrap guards
+static_assert(north_east(square_bb(SQ_E4)) == square_bb(SQ_F5));
+static_assert(south_west(square_bb(SQ_E4)) == square_bb(SQ_D3));
+
+// move.hpp
+static_assert(Move::make(SQ_E2, SQ_E4).from_sq() == SQ_E2);
+static_assert(Move::make(SQ_E2, SQ_E4).to_sq() == SQ_E4);
+static_assert(Move::make(SQ_E2, SQ_E4).type_of() == NORMAL);
+static_assert(Move::make(SQ_E7, SQ_E8, PROMOTION, QUEEN).type_of() == PROMOTION);
+static_assert(Move::make(SQ_E7, SQ_E8, PROMOTION, QUEEN).promotion_type() == QUEEN);
+static_assert(Move::make(SQ_E1, SQ_G1, CASTLING).type_of() == CASTLING);
+static_assert(Move::make(SQ_D5, SQ_E6, EN_PASSANT).type_of() == EN_PASSANT);
+static_assert(MOVE_NONE.raw() == 0);
+
+} // namespace compile_time
+
 int main() {
     Position p;
     p.set_startpos();

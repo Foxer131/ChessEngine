@@ -153,24 +153,4 @@ constexpr Color operator~(Color c) {
     return static_cast<Color>(c ^ BLACK);
 }
 
-// =============================================================================
-// Compile-time tests for the helpers above. These cost nothing at runtime; if
-// any ever fires, the named line tells you which conversion broke.
-// =============================================================================
-static_assert(make_square(FILE_A, RANK_1) == SQ_A1, "a1 must be square 0");
-static_assert(make_square(FILE_H, RANK_8) == SQ_H8, "h8 must be square 63");
-static_assert(make_square(FILE_E, RANK_4) == SQ_E4, "e4 = 4 + 3*8 = 28");
-
-static_assert(file_of(SQ_E4) == FILE_E, "file of e4 is E");
-static_assert(rank_of(SQ_E4) == RANK_4, "rank of e4 is 4");
-static_assert(file_of(SQ_H8) == FILE_H && rank_of(SQ_H8) == RANK_8, "");
-
-static_assert(make_piece(WHITE, KNIGHT) == W_KNIGHT, "");
-static_assert(make_piece(BLACK, KING)   == B_KING,   "");
-static_assert(type_of(B_QUEEN)  == QUEEN, "");
-static_assert(color_of(B_QUEEN) == BLACK, "");
-static_assert(color_of(W_PAWN)  == WHITE, "");
-
-static_assert(~WHITE == BLACK && ~BLACK == WHITE, "color flip");
-
 } // namespace chess

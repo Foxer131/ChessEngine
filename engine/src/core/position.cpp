@@ -28,8 +28,24 @@ Piece piece_from_char(char c) {
             return make_piece(col, QUEEN);
         case 'k': 
             return make_piece(col, KING);
-        default:  
+        default:
             return NO_PIECE;
+    }
+}
+
+// Castling rights that SURVIVE when square `s` is vacated or captured on: a king
+// leaving e1/e8 voids both of its rights; a rook leaving (or being taken on) a
+// corner voids that wing. Other squares change nothing. Used as
+//   castlingRights_ &= castle_mask(from) & castle_mask(to).
+int castle_mask(Square s) {
+    switch (s) {
+        case SQ_E1: return ~(WHITE_OO | WHITE_OOO) & ANY_CASTLING;
+        case SQ_A1: return ~WHITE_OOO & ANY_CASTLING;
+        case SQ_H1: return ~WHITE_OO  & ANY_CASTLING;
+        case SQ_E8: return ~(BLACK_OO | BLACK_OOO) & ANY_CASTLING;
+        case SQ_A8: return ~BLACK_OOO & ANY_CASTLING;
+        case SQ_H8: return ~BLACK_OO  & ANY_CASTLING;
+        default:    return ANY_CASTLING;
     }
 }
 
@@ -87,6 +103,118 @@ Bitboard Position::attackers_to(Square s, Bitboard occupied) const {
     Bitboard b6 = pawn_attacks(WHITE, s) & pieces(BLACK, PAWN);
 
     return b1 | b2 | b3 | b4 | b5 | b6;
+}
+
+// -----------------------------------------------------------------------------
+// make_move / unmake_move - apply a move and undo it. The Undo record carries
+// the state that the move destroys (captured piece, castling rights, ep square,
+// clocks) so unmake can restore it exactly.
+// -----------------------------------------------------------------------------
+void Position::make_move(Move m, Undo& u) {
+    const Color    us   = sideToMove_;
+    const Color    them = ~us;
+    const Square   from = m.from_sq();
+    const Square   to   = m.to_sq();
+    const MoveType type = m.type_of();
+    const Piece    pc   = board_[from];
+
+    // Snapshot the irreversible state for unmake.
+    u.captured       = NO_PIECE;
+    u.castlingRights = castlingRights_;
+    u.epSquare       = epSquare_;
+    u.halfmoveClock  = halfmoveClock_;
+    u.fullmoveNumber = fullmoveNumber_;
+
+    bool isCapture = false;
+
+    // Remove the captured piece (en passant captures off the destination square).
+    if (type == EN_PASSANT) {
+        Square capSq = (us == WHITE) ? Square(to - 8) : Square(to + 8);
+        u.captured = board_[capSq];
+        remove_piece(capSq);
+        isCapture = true;
+    } else if (board_[to] != NO_PIECE) {
+        u.captured = board_[to];
+        remove_piece(to);
+        isCapture = true;
+    }
+
+    // Move the piece (promotion places the chosen piece instead of the pawn).
+    remove_piece(from);
+    if (type == PROMOTION)
+        put_piece(make_piece(us, m.promotion_type()), to);
+    else
+        put_piece(pc, to);
+
+    // Castling also relocates the rook.
+    if (type == CASTLING) {
+        Rank r = rank_of(from);
+        if (file_of(to) == FILE_G) {            // king-side: h-rook -> f
+            remove_piece(make_square(FILE_H, r));
+            put_piece(make_piece(us, ROOK), make_square(FILE_F, r));
+        } else {                                // queen-side: a-rook -> d
+            remove_piece(make_square(FILE_A, r));
+            put_piece(make_piece(us, ROOK), make_square(FILE_D, r));
+        }
+    }
+
+    // Update castling rights (king/rook moved, or a rook was captured).
+    castlingRights_ &= castle_mask(from) & castle_mask(to);
+
+    // En-passant target exists only right after a double pawn push.
+    epSquare_ = SQ_NONE;
+    if (type_of(pc) == PAWN && (to - from == 16 || from - to == 16))
+        epSquare_ = Square((from + to) / 2);
+
+    // 50-move clock: reset on pawn moves and captures, else advance.
+    halfmoveClock_ = (type_of(pc) == PAWN || isCapture) ? 0 : halfmoveClock_ + 1;
+
+    if (us == BLACK) ++fullmoveNumber_;
+    sideToMove_ = them;
+}
+
+void Position::unmake_move(Move m, const Undo& u) {
+    sideToMove_ = ~sideToMove_;          // back to the side that moved
+    const Color    us   = sideToMove_;
+    const Square   from = m.from_sq();
+    const Square   to   = m.to_sq();
+    const MoveType type = m.type_of();
+
+    // Move the piece back (promotion turns back into a pawn).
+    if (type == PROMOTION) {
+        remove_piece(to);
+        put_piece(make_piece(us, PAWN), from);
+    } else {
+        Piece pc = board_[to];
+        remove_piece(to);
+        put_piece(pc, from);
+    }
+
+    // Undo the castling rook relocation.
+    if (type == CASTLING) {
+        Rank r = rank_of(from);
+        if (file_of(to) == FILE_G) {
+            remove_piece(make_square(FILE_F, r));
+            put_piece(make_piece(us, ROOK), make_square(FILE_H, r));
+        } else {
+            remove_piece(make_square(FILE_D, r));
+            put_piece(make_piece(us, ROOK), make_square(FILE_A, r));
+        }
+    }
+
+    // Put the captured piece back.
+    if (type == EN_PASSANT) {
+        Square capSq = (us == WHITE) ? Square(to - 8) : Square(to + 8);
+        put_piece(make_piece(~us, PAWN), capSq);
+    } else if (u.captured != NO_PIECE) {
+        put_piece(u.captured, to);
+    }
+
+    // Restore the irreversible state.
+    castlingRights_ = u.castlingRights;
+    epSquare_       = u.epSquare;
+    halfmoveClock_  = u.halfmoveClock;
+    fullmoveNumber_ = u.fullmoveNumber;
 }
 
 // -----------------------------------------------------------------------------

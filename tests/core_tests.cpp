@@ -4,6 +4,8 @@
 // so CTest treats a failure as a failing test.
 
 #include <iostream>
+#include <sstream>
+#include <string>
 #include "chess/position.hpp"
 #include "chess/bitboard.hpp"
 #include "chess/move.hpp"
@@ -66,6 +68,17 @@ static_assert(Move::make(SQ_D5, SQ_E6, EN_PASSANT).type_of() == EN_PASSANT);
 static_assert(MOVE_NONE.raw() == 0);
 
 } // namespace compile_time
+
+// A text fingerprint of a position: board + all state. Used to verify that
+// make_move followed by unmake_move restores the position exactly.
+static std::string snapshot(const Position& p) {
+    std::ostringstream os;
+    os << p.to_string()
+       << int(p.side_to_move())  << '|' << p.castling_rights() << '|'
+       << int(p.ep_square())     << '|' << p.halfmove_clock()  << '|'
+       << p.fullmove_number();
+    return os.str();
+}
 
 int main() {
     Position p;
@@ -180,6 +193,60 @@ int main() {
         CHECK(c.in_check());
         CHECK(c.is_attacked(SQ_E8, WHITE));
         CHECK(!c.is_attacked(SQ_A1, BLACK));
+    }
+
+    // ---- make / unmake ----
+    {   // double pawn push sets the en-passant square and flips the side
+        Position mp; mp.set_startpos();
+        std::string before = snapshot(mp);
+        Position::Undo u;
+        mp.make_move(Move::make(SQ_E2, SQ_E4), u);
+        CHECK(mp.piece_on(SQ_E4) == W_PAWN && mp.empty(SQ_E2));
+        CHECK(mp.side_to_move() == BLACK);
+        CHECK(mp.ep_square() == SQ_E3);
+        mp.unmake_move(Move::make(SQ_E2, SQ_E4), u);
+        CHECK(snapshot(mp) == before);
+    }
+    {   // castling relocates the rook and voids the rights
+        Position pp; pp.set_fen("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1");
+        Position::Undo u;
+        pp.make_move(Move::make(SQ_E1, SQ_G1, CASTLING), u);
+        CHECK(pp.piece_on(SQ_G1) == W_KING && pp.piece_on(SQ_F1) == W_ROOK);
+        CHECK(pp.empty(SQ_E1) && pp.empty(SQ_H1));
+        CHECK((pp.castling_rights() & (WHITE_OO | WHITE_OOO)) == 0);
+    }
+    {   // en passant removes the bypassed pawn
+        Position pp; pp.set_fen("rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3");
+        Position::Undo u;
+        pp.make_move(Move::make(SQ_E5, SQ_F6, EN_PASSANT), u);
+        CHECK(pp.piece_on(SQ_F6) == W_PAWN && pp.empty(SQ_E5) && pp.empty(SQ_F5));
+    }
+    {   // promotion replaces the pawn, and unmake brings the pawn back
+        Position pp; pp.set_fen("7k/P7/8/8/8/8/8/7K w - - 0 1");
+        Position::Undo u;
+        Move promo = Move::make(SQ_A7, SQ_A8, PROMOTION, QUEEN);
+        pp.make_move(promo, u);
+        CHECK(pp.piece_on(SQ_A8) == W_QUEEN && pp.empty(SQ_A7));
+        pp.unmake_move(promo, u);
+        CHECK(pp.piece_on(SQ_A7) == W_PAWN && pp.empty(SQ_A8));
+    }
+    {   // make then unmake must restore the exact position for every move kind
+        struct Case { const char* fen; Move move; };
+        const Case cases[] = {
+            {"rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 2", Move::make(SQ_E4, SQ_D5)},
+            {"r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1", Move::make(SQ_E1, SQ_G1, CASTLING)},
+            {"r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1", Move::make(SQ_E1, SQ_C1, CASTLING)},
+            {"rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3", Move::make(SQ_E5, SQ_F6, EN_PASSANT)},
+            {"7k/P7/8/8/8/8/8/7K w - - 0 1", Move::make(SQ_A7, SQ_A8, PROMOTION, QUEEN)},
+        };
+        for (const Case& c : cases) {
+            Position pp; pp.set_fen(c.fen);
+            std::string before = snapshot(pp);
+            Position::Undo u;
+            pp.make_move(c.move, u);
+            pp.unmake_move(c.move, u);
+            CHECK(snapshot(pp) == before);
+        }
     }
 
     if (g_failures == 0)

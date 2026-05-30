@@ -19,6 +19,7 @@
 #include <string>
 #include "chess/types.hpp"
 #include "chess/bitboard.hpp"
+#include "chess/move.hpp"
 
 namespace chess {
 
@@ -75,6 +76,18 @@ public:
     bool in_check() const {
         return is_attacked(king_square(side_to_move()), ~side_to_move());
     }
+
+    // ---- make / unmake (apply and undo a move) ----
+    // State that a move destroys and unmake must restore.
+    struct Undo {
+        Piece  captured       = NO_PIECE;  // piece taken (incl. en-passant), or NO_PIECE
+        int    castlingRights = NO_CASTLING;
+        Square epSquare       = SQ_NONE;
+        int    halfmoveClock  = 0;
+        int    fullmoveNumber = 1;
+    };
+    void make_move(Move m, Undo& u);          // apply m, recording undo info in u
+    void unmake_move(Move m, const Undo& u);  // restore the position before m
 
     // ---- board edits (fill in - in position.cpp) ----
     void put_piece(Piece pc, Square s);   // place pc on s (s must be empty)

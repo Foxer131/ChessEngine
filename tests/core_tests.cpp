@@ -6,6 +6,9 @@
 #include <iostream>
 #include "chess/position.hpp"
 #include "chess/bitboard.hpp"
+#include "chess/move.hpp"
+#include "chess/movelist.hpp"
+#include "chess/attacks.hpp"
 
 using namespace chess;
 
@@ -75,6 +78,29 @@ int main() {
         CHECK(f.halfmove_clock() == 5);
         CHECK(f.fullmove_number() == 10);
     }
+
+    // ---- MoveList ----
+    {
+        MoveList ml;
+        CHECK(ml.empty());
+        ml.add(Move::make(SQ_E2, SQ_E4));
+        ml.add(Move::make(SQ_G1, SQ_F3));
+        CHECK(ml.size() == 2);
+        CHECK(ml[0].to_sq() == SQ_E4);
+        int n = 0;
+        for (Move m : ml) { (void)m; ++n; }
+        CHECK(n == 2);
+    }
+
+    // ---- attack tables ----
+    CHECK(popcount(knight_attacks(SQ_E4)) == 8);
+    CHECK(popcount(knight_attacks(SQ_B1)) == 3);
+    CHECK(knight_attacks(SQ_B1) == (square_bb(SQ_A3) | square_bb(SQ_C3) | square_bb(SQ_D2)));
+    CHECK(popcount(king_attacks(SQ_E4)) == 8);
+    CHECK(popcount(king_attacks(SQ_A1)) == 3);
+    CHECK(pawn_attacks(WHITE, SQ_E4) == (square_bb(SQ_D5) | square_bb(SQ_F5)));
+    CHECK(pawn_attacks(WHITE, SQ_A2) == square_bb(SQ_B3));   // a-pawn: only one diagonal
+    CHECK(pawn_attacks(BLACK, SQ_E5) == (square_bb(SQ_D4) | square_bb(SQ_F4)));
 
     if (g_failures == 0)
         std::cout << "core position checks passed\n";

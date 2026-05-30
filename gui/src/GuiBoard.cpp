@@ -1,90 +1,89 @@
 #include "GuiBoard.h"
 
+#include <cctype>
+#include <string>
+
+#include "chess/movegen.hpp"
+#include "chess/movelist.hpp"
+
+namespace {
+
+std::string square_to_uci(chess::Square s) {
+    std::string r;
+    r += char('a' + chess::file_of(s));
+    r += char('1' + chess::rank_of(s));
+    return r;
+}
+
+// UCI string for a move, matching the engine's format (so we can pair a clicked
+// from/to with one of the generated legal moves).
+std::string move_to_uci(chess::Move m) {
+    std::string s = square_to_uci(m.from_sq()) + square_to_uci(m.to_sq());
+    if (m.type_of() == chess::PROMOTION)
+        s += "  nbrq"[m.promotion_type()];   // PieceType KNIGHT..QUEEN -> n b r q
+    return s;
+}
+
+chess::Square sq(int file, int rank) {
+    return chess::make_square(chess::File(file), chess::Rank(rank));
+}
+
+} // namespace
+
 void GuiBoard::reset() {
-    static const char* startRanks[8] = {
-        "RNBQKBNR", // rank 1 (white back rank)
-        "PPPPPPPP", // rank 2
-        "........",
-        "........",
-        "........",
-        "........",
-        "pppppppp", // rank 7
-        "rnbqkbnr", // rank 8 (black back rank)
-    };
-    for (int rank = 0; rank < 8; ++rank)
-        for (int file = 0; file < 8; ++file)
-            board_[rank][file] = startRanks[rank][file];
-    whiteToMove_ = true;
+    pos_.set_startpos();
+}
+
+char GuiBoard::at(int file, int rank) const {
+    chess::Piece pc = pos_.piece_on(sq(file, rank));
+    if (pc == chess::NO_PIECE) return '.';
+    static const char kinds[] = ".PNBRQK";          // index by PieceType
+    char c = kinds[chess::type_of(pc)];
+    return (chess::color_of(pc) == chess::WHITE) ? c
+                                                 : char(std::tolower(c));
+}
+
+bool GuiBoard::empty(int file, int rank) const {
+    return pos_.piece_on(sq(file, rank)) == chess::NO_PIECE;
+}
+
+GuiBoard::Color GuiBoard::sideToMove() const {
+    return pos_.side_to_move() == chess::WHITE ? Color::White : Color::Black;
 }
 
 bool GuiBoard::isOwnPiece(int file, int rank) const {
-    char p = board_[rank][file];
-    if (p == '.') return false;
-    return colorOf(p) == sideToMove();
+    chess::Piece pc = pos_.piece_on(sq(file, rank));
+    return pc != chess::NO_PIECE && chess::color_of(pc) == pos_.side_to_move();
 }
 
 bool GuiBoard::isPromotion(int fromFile, int fromRank, int toFile, int toRank) const {
     (void)toFile;
-    char p = board_[fromRank][fromFile];
-    if (p == 'P') return toRank == 7;
-    if (p == 'p') return toRank == 0;
-    return false;
-}
-
-QString GuiBoard::toUci(int fromFile, int fromRank, int toFile, int toRank, QChar promo) {
-    auto sq = [](int f, int r) {
-        return QString(QChar('a' + f)) + QChar('1' + r);
-    };
-    QString s = sq(fromFile, fromRank) + sq(toFile, toRank);
-    if (!promo.isNull()) s += promo;
-    return s;
+    chess::Piece pc = pos_.piece_on(sq(fromFile, fromRank));
+    if (chess::type_of(pc) != chess::PAWN) return false;
+    return toRank == 7 || toRank == 0;   // reaching either last rank
 }
 
 bool GuiBoard::applyUci(const QString& uci) {
-    if (uci.size() < 4) return false;
-    int fromFile = uci[0].toLatin1() - 'a';
-    int fromRank = uci[1].toLatin1() - '1';
-    int toFile   = uci[2].toLatin1() - 'a';
-    int toRank   = uci[3].toLatin1() - '1';
-    auto inRange = [](int v) { return v >= 0 && v < 8; };
-    if (!inRange(fromFile) || !inRange(fromRank) || !inRange(toFile) || !inRange(toRank))
-        return false;
-
-    char piece = board_[fromRank][fromFile];
-    if (piece == '.') return false;
-
-    // En passant: a pawn moving diagonally onto an empty square captures the
-    // pawn that sits beside the destination (same rank as the origin).
-    bool isPawn = (piece == 'P' || piece == 'p');
-    if (isPawn && fromFile != toFile && board_[toRank][toFile] == '.')
-        board_[fromRank][toFile] = '.';
-
-    // Castling: the king moves two files; relocate the corresponding rook.
-    bool isKing = (piece == 'K' || piece == 'k');
-    if (isKing && std::abs(toFile - fromFile) == 2) {
-        if (toFile == 6) { // king-side: rook h->f
-            board_[fromRank][5] = board_[fromRank][7];
-            board_[fromRank][7] = '.';
-        } else if (toFile == 2) { // queen-side: rook a->d
-            board_[fromRank][3] = board_[fromRank][0];
-            board_[fromRank][0] = '.';
+    const std::string want = uci.toStdString();
+    chess::MoveList legal;
+    chess::generate_legal(pos_, legal);
+    for (chess::Move m : legal) {
+        if (move_to_uci(m) == want) {
+            chess::Position::Undo u;       // no takeback yet -> undo is discarded
+            pos_.make_move(m, u);
+            return true;
         }
     }
+    return false;   // illegal or malformed -> reject
+}
 
-    // Move the piece.
-    board_[fromRank][fromFile] = '.';
-    board_[toRank][toFile] = piece;
-
-    // Promotion: 5th char (lowercase q/r/b/n) names the new piece.
-    if (uci.size() >= 5) {
-        char promo = uci[4].toLower().toLatin1();
-        char np = promo;
-        if (isWhite(piece)) np = QChar(promo).toUpper().toLatin1();
-        board_[toRank][toFile] = np;
-    }
-
-    whiteToMove_ = !whiteToMove_;
-    return true;
+QString GuiBoard::toUci(int fromFile, int fromRank, int toFile, int toRank, QChar promo) {
+    auto s = [](int f, int r) {
+        return QString(QChar('a' + f)) + QChar('1' + r);
+    };
+    QString out = s(fromFile, fromRank) + s(toFile, toRank);
+    if (!promo.isNull()) out += promo;
+    return out;
 }
 
 QString GuiBoard::glyph(char piece) {

@@ -11,9 +11,11 @@ separate process that drives it over UCI. CPU-only — see the GPU note below.
 - **GPU:** intentionally NOT used. Alpha-beta is sequential/branchy and does not
   map to GPUs. Only the Lc0 deep-net+MCTS paradigm benefits from GPU. If the
   user revisits GPU, it means switching paradigms — flag that explicitly.
-- **Engine ⇄ GUI:** decoupled via the UCI protocol (stdin/stdout). The GUI
-  (`chess_gui`) launches the `engine` exe (Qt `QProcess`) and never links
-  `chess_core`.
+- **Engine ⇄ GUI:** the engine's *thinking* runs in a separate `engine` process
+  driven over UCI (Qt `QProcess`). The GUI *does* link `chess_core` for the
+  rules/legality (GuiBoard wraps `chess::Position` + `generate_legal`, so the
+  board only accepts legal moves) — the UCI decoupling is about the search, not
+  the move rules.
 - **GUI tech:** Qt (Widgets). Game setup must let the user pick color and
   search depth / time per move.
 

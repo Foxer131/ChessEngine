@@ -32,7 +32,9 @@ add_executable(chess_gui
     src/UciEngine.cpp
     src/GuiBoard.cpp)
 
-target_link_libraries(chess_gui PRIVATE Qt::Widgets)
+# Qt::Widgets for the UI; chess_core for the (perft-validated) rules + legality.
+# The engine's *thinking* still runs in a separate process over UCI.
+target_link_libraries(chess_gui PRIVATE Qt::Widgets chess_core)
 
 # On Windows, mark as a GUI app (no console window) in Release.
 if(WIN32)

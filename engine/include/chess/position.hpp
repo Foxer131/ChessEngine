@@ -58,6 +58,24 @@ public:
     int    halfmove_clock() const  { return halfmoveClock_; }  // for the 50-move rule
     int    fullmove_number() const { return fullmoveNumber_; } // starts at 1
 
+    // ---- attack / check queries ----
+    // Every piece of EITHER color that attacks square `s`, given `occupied`.
+    // (fill in - in position.cpp)
+    Bitboard attackers_to(Square s, Bitboard occupied) const;
+
+    // The square of color c's king.
+    Square king_square(Color c) const { return lsb(pieces(c, KING)); }
+
+    // Is square `s` attacked by any piece of color `by`?
+    bool is_attacked(Square s, Color by) const {
+        return (attackers_to(s, pieces()) & pieces(by)) != 0;
+    }
+
+    // Is the side-to-move's king currently in check?
+    bool in_check() const {
+        return is_attacked(king_square(side_to_move()), ~side_to_move());
+    }
+
     // ---- board edits (fill in - in position.cpp) ----
     void put_piece(Piece pc, Square s);   // place pc on s (s must be empty)
     void remove_piece(Square s);          // remove whatever is on s

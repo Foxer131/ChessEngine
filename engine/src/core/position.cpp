@@ -1,4 +1,5 @@
 #include "chess/position.hpp"
+#include "chess/attacks.hpp"
 
 #include <cctype>
 #include <sstream>
@@ -55,6 +56,37 @@ void Position::remove_piece(Square s) {
     clear(byColor_[color_of(pc)], s);
     clear(byType_[type_of(pc)], s);
     board_[s] = NO_PIECE;
+}
+
+// -----------------------------------------------------------------------------
+// attackers_to - the set of ALL pieces (both colors) that attack square `s`.
+// -----------------------------------------------------------------------------
+Bitboard Position::attackers_to(Square s, Bitboard occupied) const {
+    // PSEUDOCODE - for each piece kind, intersect "squares that kind attacks
+    // FROM s" with "where those pieces actually sit", then OR the parts.
+    //
+    //   knights        : knight_attacks(s)            AND pieces(KNIGHT)
+    //   kings          : king_attacks(s)              AND pieces(KING)
+    //   diagonal sliders: bishop_attacks(s, occupied) AND (pieces(BISHOP) | pieces(QUEEN))
+    //   straight sliders: rook_attacks(s, occupied)   AND (pieces(ROOK)   | pieces(QUEEN))
+    //
+    //   pawns (the subtle bit - pawn attacks are DIRECTIONAL, so swap the color):
+    //     a white pawn hits `s` from the squares a BLACK pawn on `s` would
+    //     attack, and vice-versa. So:
+    //       white pawn attackers : pawn_attacks(BLACK, s) AND pieces(WHITE, PAWN)
+    //       black pawn attackers : pawn_attacks(WHITE, s) AND pieces(BLACK, PAWN)
+    //
+    // OR everything above together and return it.
+
+    Bitboard b1 = knight_attacks(s) & pieces(KNIGHT);
+    Bitboard b2 = king_attacks(s) & pieces(KING);
+    Bitboard b3 = bishop_attacks(s, occupied) & (pieces(BISHOP) | pieces(QUEEN));
+    Bitboard b4 = rook_attacks(s, occupied) & (pieces(ROOK) | pieces(QUEEN));
+
+    Bitboard b5 = pawn_attacks(BLACK, s) & pieces(WHITE, PAWN);
+    Bitboard b6 = pawn_attacks(WHITE, s) & pieces(BLACK, PAWN);
+
+    return b1 | b2 | b3 | b4 | b5 | b6;
 }
 
 // -----------------------------------------------------------------------------

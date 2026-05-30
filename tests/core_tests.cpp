@@ -167,6 +167,21 @@ int main() {
         CHECK((a & square_bb(SQ_A1)) == 0);
     }
 
+    // ---- attackers_to / checks ----
+    CHECK(p.king_square(WHITE) == SQ_E1);
+    CHECK(p.king_square(BLACK) == SQ_E8);
+    CHECK(!p.in_check());                                  // startpos: nobody in check
+    CHECK(p.is_attacked(SQ_F3, WHITE));                    // g1 knight + e2/g2 pawns
+    CHECK(!p.is_attacked(SQ_E2, BLACK));
+    CHECK(popcount(p.attackers_to(SQ_F3, p.pieces()) & p.pieces(WHITE)) == 3);
+    {
+        Position c;
+        c.set_fen("4k3/8/8/8/8/8/4Q3/4K3 b - - 0 1");     // white queen checks black king
+        CHECK(c.in_check());
+        CHECK(c.is_attacked(SQ_E8, WHITE));
+        CHECK(!c.is_attacked(SQ_A1, BLACK));
+    }
+
     if (g_failures == 0)
         std::cout << "core position checks passed\n";
     else

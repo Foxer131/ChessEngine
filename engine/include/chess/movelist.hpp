@@ -21,11 +21,14 @@ public:
     bool empty() const { return size_ == 0; }
     void clear()       { size_ = 0; }
 
-    Move operator[](int i) const { return moves_[i]; }
+    Move  operator[](int i) const { return moves_[i]; }
+    Move& operator[](int i)       { return moves_[i]; }  // mutable: move ordering reorders in place
 
     // Enable range-for: `for (Move m : list) ...`
     const Move* begin() const { return moves_; }
     const Move* end()   const { return moves_ + size_; }
+    Move* begin() { return moves_; }
+    Move* end()   { return moves_ + size_; }
 
 private:
     Move moves_[CAPACITY];

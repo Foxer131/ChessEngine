@@ -9,6 +9,7 @@
 #include "chess/eval.hpp"
 #include "chess/movegen.hpp"
 #include "chess/position.hpp"
+#include "chess/search.hpp"
 #include "chess/bitboard.hpp"
 #include "chess/move.hpp"
 #include "chess/movelist.hpp"
@@ -314,6 +315,29 @@ int main() {
     {   // white is missing a rook; black to move is up ~500 (side-to-move view)
         Position e; e.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/1NBQKBNR b KQk - 0 1");
         CHECK(evaluate(e) > 400);
+    }
+
+    // ---- search ----
+    {   // back-rank mate in one: Ra1-a8#
+        Position s; s.set_fen("6k1/5ppp/8/8/8/8/8/R5K1 w - - 0 1");
+        SearchResult r = search(s, SearchLimits{/*depth*/4, 0, 0});
+        CHECK(r.best == Move::make(SQ_A1, SQ_A8));
+        CHECK(r.score > 20000);                 // a mate score
+    }
+    {   // free queen: Qd1xd4 wins material
+        Position s; s.set_fen("4k3/8/8/8/3q4/8/8/3QK3 w - - 0 1");
+        SearchResult r = search(s, SearchLimits{6, 0, 0});
+        CHECK(r.best == Move::make(SQ_D1, SQ_D4));
+        CHECK(r.score > 500);
+    }
+    {   // from the start, the best move must be legal and the search must finish
+        Position s; s.set_startpos();
+        SearchResult r = search(s, SearchLimits{6, 0, 0});
+        CHECK(r.best != MOVE_NONE);
+        MoveList legal; generate_legal(s, legal);
+        bool found = false;
+        for (Move m : legal) if (m == r.best) found = true;
+        CHECK(found);
     }
 
     if (g_failures == 0)

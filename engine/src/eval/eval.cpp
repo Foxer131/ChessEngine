@@ -27,11 +27,6 @@ constexpr int PHASE_MAX = 24;
 constexpr int MOB_MG[PIECE_TYPE_NB]  = {0, 0, 4, 4, 2, 1, 0};
 constexpr int MOB_EG[PIECE_TYPE_NB]  = {0, 0, 4, 5, 4, 2, 0};
 
-// Passed-pawn bonus by the pawn's relative rank (0..7 from its own side). Heavily
-// endgame-weighted: a passer is a long-term, often decisive, endgame asset.
-constexpr int PASSED_MG[8] = {0, 0, 10, 15, 30,  55,  90, 0};
-constexpr int PASSED_EG[8] = {0, 0, 20, 30, 55, 100, 160, 0};
-
 // Piece-square tables [PieceType][square], a8=0 ordering. Row 0 (NO_PIECE_TYPE) unused.
 constexpr int MG_PSQT[PIECE_TYPE_NB][64] = {
     {}, // NO_PIECE_TYPE
@@ -169,24 +164,6 @@ Bitboard pawn_attacks_bb(Color c, Bitboard pawns) {
                         : (south_east(pawns) | south_west(pawns));
 }
 
-// For a pawn of colour c on square s, the squares an enemy pawn would have to
-// occupy to stop it being passed: the pawn's file plus both neighbours, on every
-// rank ahead of it. A pawn is passed iff none of these hold an enemy pawn.
-struct PassedMask {
-    Bitboard m[COLOR_NB][SQUARE_NB] = {};
-    PassedMask() {
-        for (int s = 0; s < 64; ++s) {
-            int f = s & 7, r = s >> 3;
-            Bitboard files = FILE_A_BB << f;
-            if (f > 0) files |= FILE_A_BB << (f - 1);
-            if (f < 7) files |= FILE_A_BB << (f + 1);
-            for (int rr = r + 1; rr <= 7; ++rr) m[WHITE][s] |= files & (Bitboard(0xFF) << (8 * rr));
-            for (int rr = r - 1; rr >= 0; --rr) m[BLACK][s] |= files & (Bitboard(0xFF) << (8 * rr));
-        }
-    }
-};
-const PassedMask PASSED;
-
 Bitboard piece_attacks(PieceType pt, Square s, Bitboard occ) {
     switch (pt) {
         case KNIGHT: return knight_attacks(s);
@@ -252,20 +229,6 @@ int evaluate(const Position& pos) {
             if (f > FILE_A) adj |= file_bb(File(f - 1));
             if (f < FILE_H) adj |= file_bb(File(f + 1));
             if (!(myPawns & adj)) { mg -= sign * 15 * cnt; eg -= sign * 12 * cnt; }  // isolated
-        }
-
-        // Passed pawns: no enemy pawn on this or an adjacent file ahead of it.
-        // Rank-scaled bonus (mostly endgame), plus a little extra when defended by
-        // another pawn (a protected passer is much harder to stop).
-        const Bitboard myPawnAtt = pawn_attacks_bb(c, myPawns);
-        Bitboard pawns = myPawns;
-        while (pawns) {
-            Square s = pop_lsb(pawns);
-            if (oppPawns & PASSED.m[c][s]) continue;                 // not passed
-            int rr = (c == WHITE) ? rank_of(s) : 7 - rank_of(s);     // relative rank
-            mg += sign * PASSED_MG[rr];
-            eg += sign * PASSED_EG[rr];
-            if (myPawnAtt & square_bb(s)) eg += sign * (PASSED_EG[rr] / 4);  // protected
         }
     }
 

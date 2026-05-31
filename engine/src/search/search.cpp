@@ -205,16 +205,6 @@ struct Worker {
     // previous move (indexed by our side + that move's from/to).
     Move counterMove[COLOR_NB][SQUARE_NB][SQUARE_NB] = {};
 
-    // Per-ply search stack: static eval (for the "improving" trend) and the move
-    // played at each ply (for continuation history). Indexed by ply.
-    struct Stack { int staticEval = 0; Move currentMove = MOVE_NONE; };
-    Stack ss[MAX_PLY + 4] = {};
-
-    // Continuation history: how good a quiet move (moved piece -> to) has been as
-    // a reply to the opponent's previous move (its piece -> to). Generalises the
-    // counter-move heuristic from a single move to a learned score. [prev][cur].
-    std::int16_t contHist[PIECE_NB][SQUARE_NB][PIECE_NB][SQUARE_NB] = {};
-
     // Zobrist keys of all positions on the current line (game history + search
     // path). Invariant: back() == pos.key() at every node. Used for repetitions.
     std::vector<std::uint64_t> repList;
@@ -254,17 +244,6 @@ struct Worker {
         return m.type_of() == EN_PASSANT || p.piece_on(m.to_sq()) != NO_PIECE;
     }
 
-    // Combined quiet-move score: butterfly history + 1-ply continuation history.
-    // Must be called with the node position on the board (the move NOT yet made),
-    // so piece_on(from) is the moving piece. Used for ordering and LMR.
-    int quiet_history(Move m, Move prevMove, Color us) const {
-        int s = history[us][m.from_sq()][m.to_sq()];
-        if (prevMove != MOVE_NONE)
-            s += contHist[pos.piece_on(prevMove.to_sq())][prevMove.to_sq()]
-                         [pos.piece_on(m.from_sq())][m.to_sq()];
-        return s;
-    }
-
     int score_move(Move m, Move ttMove, Move prevMove, int ply, Color us) const {
         if (m == ttMove) return 2'000'000;
         Piece victim = (m.type_of() == EN_PASSANT) ? make_piece(~us, PAWN)
@@ -284,7 +263,7 @@ struct Worker {
         if (m == killers[ply][1])     return 700'000;
         if (prevMove != MOVE_NONE &&
             m == counterMove[us][prevMove.from_sq()][prevMove.to_sq()]) return 600'000;
-        return quiet_history(m, prevMove, us);
+        return history[us][m.from_sq()][m.to_sq()];
     }
 
     // Sort the list in place, best move first (insertion sort; lists are small).
@@ -369,12 +348,6 @@ struct Worker {
         const bool  pvNode     = (beta - alpha) > 1;
         const int   staticEval = inCheck ? -INF : evaluate(pos);
 
-        // "Improving": is our static eval better than it was two plies ago? When
-        // it is, we are likely on a good trend and can prune/reduce less timidly;
-        // when not, reduce harder. (In check the eval is undefined -> not improving.)
-        ss[ply].staticEval   = staticEval;
-        const bool improving = !inCheck && ply >= 2 && staticEval > ss[ply - 2].staticEval;
-
         // Reverse futility pruning (static null move): if our static eval is so
         // far above beta that even a generous margin can't pull it under, prune.
         if (!pvNode && !inCheck && depth <= 6 && beta < MATE_IN_MAX
@@ -413,7 +386,6 @@ struct Worker {
             ++moveCount;
             const bool capture = is_capture(pos, m);
             const bool quiet   = !capture && m.type_of() != PROMOTION;
-            const int  qh      = quiet ? quiet_history(m, prevMove, us) : 0;  // before the move is made
 
             Position::Undo u;
             pos.make_move(m, u);
@@ -442,10 +414,7 @@ struct Worker {
                 int R = 0;  // late move reduction for quiet, non-checking moves
                 if (depth >= 3 && moveCount > 3 && quiet && !givesCheck && !inCheck) {
                     R = LMR.r[std::min(depth, 63)][std::min(moveCount, 63)];
-                    if (pvNode)    --R;            // PV nodes: reduce less
-                    if (!improving) ++R;           // bad trend: reduce more
-                    // Reduce quiet moves with good (continuation) history less.
-                    R -= std::clamp(qh / 16000, -1, 2);
+                    if (pvNode) --R;
                     R = std::max(0, std::min(R, depth - 2));
                 }
 
@@ -475,12 +444,8 @@ struct Worker {
                     int& h = history[us][m.from_sq()][m.to_sq()];
                     h += depth * depth;
                     if (h > 90'000) h = 90'000;      // cap below killers/counter scores
-                    if (prevMove != MOVE_NONE) {     // this move refuted prevMove
+                    if (prevMove != MOVE_NONE)       // this move refuted prevMove
                         counterMove[us][prevMove.from_sq()][prevMove.to_sq()] = m;
-                        std::int16_t& ch = contHist[pos.piece_on(prevMove.to_sq())][prevMove.to_sq()]
-                                                   [pos.piece_on(m.from_sq())][m.to_sq()];
-                        ch = static_cast<std::int16_t>(std::clamp(ch + depth * depth, -16000, 16000));
-                    }
                 }
                 break;
             }
@@ -548,8 +513,8 @@ SearchResult search(Position& pos, const SearchLimits& limits,
 
     const int nThreads = std::max(1, limits.threads);
     if (nThreads == 1) {
-        auto w = std::make_unique<Worker>(shared, pos, 0);  // heap: Worker is large
-        return w->go();
+        Worker w(shared, pos, 0);
+        return w.go();
     }
 
     // Lazy SMP: N workers search the same root, sharing only the TT. Each helper

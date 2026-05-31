@@ -158,6 +158,12 @@ constexpr int EG_PSQT[PIECE_TYPE_NB][64] = {
 
 Bitboard file_bb(File f) { return FILE_A_BB << f; }
 
+// Squares a side's pawns attack (the two forward diagonals).
+Bitboard pawn_attacks_bb(Color c, Bitboard pawns) {
+    return (c == WHITE) ? (north_east(pawns) | north_west(pawns))
+                        : (south_east(pawns) | south_west(pawns));
+}
+
 Bitboard piece_attacks(PieceType pt, Square s, Bitboard occ) {
     switch (pt) {
         case KNIGHT: return knight_attacks(s);
@@ -179,6 +185,9 @@ int evaluate(const Position& pos) {
         const Bitboard own      = pos.pieces(c);
         const Bitboard myPawns  = pos.pieces(c, PAWN);
         const Bitboard oppPawns = pos.pieces(~c, PAWN);
+        // Don't credit "mobility" to squares an enemy pawn covers: a knight that
+        // can only step onto a pawn-guarded square isn't really mobile there.
+        const Bitboard safe     = ~own & ~pawn_attacks_bb(~c, oppPawns);
 
         for (PieceType pt = PAWN; pt <= KING; pt = PieceType(pt + 1)) {
             Bitboard b = pos.pieces(c, pt);
@@ -190,7 +199,7 @@ int evaluate(const Position& pos) {
                 eg += sign * (EG_VAL[pt] + EG_PSQT[pt][idx]);
 
                 if (pt == KNIGHT || pt == BISHOP || pt == ROOK || pt == QUEEN) {
-                    int m = popcount(piece_attacks(pt, s, occ) & ~own);
+                    int m = popcount(piece_attacks(pt, s, occ) & safe);
                     mg += sign * m * MOB_MG[pt];
                     eg += sign * m * MOB_EG[pt];
                 }

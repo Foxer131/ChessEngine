@@ -135,6 +135,10 @@ struct Searcher {
 
     Move killers[MAX_PLY][2] = {};
     int  history[COLOR_NB][SQUARE_NB][SQUARE_NB] = {};
+    // Counter-move heuristic: the quiet move that last refuted the opponent's
+    // previous move (indexed by our side + that move's from/to). Tried right
+    // after the killers in move ordering.
+    Move counterMove[COLOR_NB][SQUARE_NB][SQUARE_NB] = {};
 
     // Zobrist keys of all positions on the current line (game history + search
     // path). Invariant: back() == pos.key() at every node. Used for repetitions.
@@ -170,25 +174,33 @@ struct Searcher {
         return m.type_of() == EN_PASSANT || p.piece_on(m.to_sq()) != NO_PIECE;
     }
 
-    int score_move(Move m, Move ttMove, int ply, Color us) const {
+    int score_move(Move m, Move ttMove, Move prevMove, int ply, Color us) const {
         if (m == ttMove) return 2'000'000;
         Piece victim = (m.type_of() == EN_PASSANT) ? make_piece(~us, PAWN)
                                                    : pos.piece_on(m.to_sq());
         if (victim != NO_PIECE) {  // capture -> MVV-LVA (value victim, cheap attacker first)
             int attacker = type_of(pos.piece_on(m.from_sq()));
-            return 1'000'000 + PIECE_VAL[type_of(victim)] * 16 - attacker;
+            int mvvlva   = PIECE_VAL[type_of(victim)] * 16 - attacker;
+            // Cheap path (Simplicity's trick): a capture by an equal-or-cheaper
+            // piece can't lose material, so skip the SEE call. Otherwise verify;
+            // captures that lose material by SEE sort behind every quiet move.
+            if (PIECE_VAL[attacker] <= PIECE_VAL[type_of(victim)])
+                return 1'000'000 + mvvlva;
+            return (see(pos, m) >= 0 ? 1'000'000 : -1'000'000) + mvvlva;
         }
         if (m.type_of() == PROMOTION) return 900'000 + PIECE_VAL[m.promotion_type()];
         if (m == killers[ply][0])     return 800'000;
         if (m == killers[ply][1])     return 700'000;
+        if (prevMove != MOVE_NONE &&
+            m == counterMove[us][prevMove.from_sq()][prevMove.to_sq()]) return 600'000;
         return history[us][m.from_sq()][m.to_sq()];
     }
 
     // Sort the list in place, best move first (insertion sort; lists are small).
-    void order_moves(MoveList& list, Move ttMove, int ply, Color us) {
+    void order_moves(MoveList& list, Move ttMove, Move prevMove, int ply, Color us) {
         const int n = list.size();
         int scores[MoveList::CAPACITY];
-        for (int i = 0; i < n; ++i) scores[i] = score_move(list[i], ttMove, ply, us);
+        for (int i = 0; i < n; ++i) scores[i] = score_move(list[i], ttMove, prevMove, ply, us);
         for (int i = 1; i < n; ++i) {
             Move m = list[i];
             int  sc = scores[i], j = i - 1;
@@ -210,7 +222,7 @@ struct Searcher {
 
         MoveList moves;
         generate_legal(pos, moves);
-        order_moves(moves, MOVE_NONE, ply, pos.side_to_move());
+        order_moves(moves, MOVE_NONE, MOVE_NONE, ply, pos.side_to_move());
 
         for (Move m : moves) {
             if (!is_capture(pos, m) && m.type_of() != PROMOTION) continue;  // captures/promos only
@@ -236,7 +248,7 @@ struct Searcher {
         return alpha;
     }
 
-    int negamax(int depth, int alpha, int beta, int ply) {
+    int negamax(int depth, int alpha, int beta, int ply, Move prevMove) {
         if (out_of_time()) return 0;
         ++nodes;
 
@@ -280,7 +292,7 @@ struct Searcher {
             Position::Undo u;
             pos.make_null_move(u);
             repList.push_back(pos.key());
-            int score = -negamax(depth - 1 - R, -beta, -beta + 1, ply + 1);
+            int score = -negamax(depth - 1 - R, -beta, -beta + 1, ply + 1, MOVE_NONE);
             repList.pop_back();
             pos.unmake_null_move(u);
             if (stop) return 0;
@@ -292,7 +304,7 @@ struct Searcher {
         if (moves.size() == 0)                       // checkmate or stalemate
             return inCheck ? -MATE + ply : 0;
 
-        order_moves(moves, ttMove, ply, us);
+        order_moves(moves, ttMove, prevMove, ply, us);
 
         int  bestScore = -INF;
         Move bestMove  = MOVE_NONE;
@@ -326,7 +338,7 @@ struct Searcher {
 
             int score;
             if (moveCount == 1) {
-                score = -negamax(depth - 1, -beta, -alpha, ply + 1);   // PV: full window
+                score = -negamax(depth - 1, -beta, -alpha, ply + 1, m);   // PV: full window
             } else {
                 int R = 0;  // late move reduction for quiet, non-checking moves
                 if (depth >= 3 && moveCount > 3 && quiet && !givesCheck && !inCheck) {
@@ -335,11 +347,11 @@ struct Searcher {
                     R = std::max(0, std::min(R, depth - 2));
                 }
 
-                score = -negamax(depth - 1 - R, -alpha - 1, -alpha, ply + 1);  // reduced null window
+                score = -negamax(depth - 1 - R, -alpha - 1, -alpha, ply + 1, m);  // reduced null window
                 if (score > alpha && R > 0)
-                    score = -negamax(depth - 1, -alpha - 1, -alpha, ply + 1);  // re-search full depth
+                    score = -negamax(depth - 1, -alpha - 1, -alpha, ply + 1, m);  // re-search full depth
                 if (score > alpha && score < beta)
-                    score = -negamax(depth - 1, -beta, -alpha, ply + 1);       // re-search full window
+                    score = -negamax(depth - 1, -beta, -alpha, ply + 1, m);       // re-search full window
             }
 
             repList.pop_back();
@@ -358,7 +370,11 @@ struct Searcher {
                         killers[ply][1] = killers[ply][0];
                         killers[ply][0] = m;
                     }
-                    history[us][m.from_sq()][m.to_sq()] += depth * depth;
+                    int& h = history[us][m.from_sq()][m.to_sq()];
+                    h += depth * depth;
+                    if (h > 90'000) h = 90'000;      // cap below killers/counter scores
+                    if (prevMove != MOVE_NONE)       // this move refuted prevMove
+                        counterMove[us][prevMove.from_sq()][prevMove.to_sq()] = m;
                 }
                 break;
             }
@@ -387,7 +403,7 @@ struct Searcher {
 
             int score;
             while (true) {                            // aspiration window with widening
-                score = negamax(d, alpha, beta, 0);
+                score = negamax(d, alpha, beta, 0, MOVE_NONE);
                 if (stop) break;
                 if (score <= alpha)      { window *= 2; alpha = std::max(-INF, score - window); }
                 else if (score >= beta)  { window *= 2; beta  = std::min( INF, score + window); }

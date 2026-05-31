@@ -7,11 +7,13 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
 #include <iostream>
 #include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "chess/position.hpp"
 #include "chess/movegen.hpp"
@@ -27,6 +29,7 @@ std::thread g_worker;
 std::mutex  g_cout;   // serializes stdout between the worker and the main thread
 OpeningBook g_book;
 bool        g_own_book = true;
+std::vector<std::uint64_t> g_history;   // zobrist keys of the game, for repetition
 
 std::string square_to_uci(Square s) {
     std::string r;
@@ -75,18 +78,21 @@ void cmd_position(Position& pos, std::istringstream& is) {
         return;
     }
 
+    g_history.clear();
+    g_history.push_back(pos.key());
     while (is >> token) {
         if (token == "moves") continue;
         Move m = find_move(pos, token);
         if (m == MOVE_NONE) break;
         Position::Undo u;
         pos.make_move(m, u);
+        g_history.push_back(pos.key());
     }
 }
 
 // The worker body: search, then print info + bestmove (under the cout lock).
-void run_search(Position& pos, SearchLimits lim) {
-    SearchResult r = search(pos, lim);
+void run_search(Position& pos, SearchLimits lim, std::vector<std::uint64_t> hist) {
+    SearchResult r = search(pos, lim, hist);
     std::lock_guard<std::mutex> lk(g_cout);
     std::cout << "info depth " << r.depth << " score cp " << r.score
               << " nodes " << r.nodes << " pv " << move_to_uci(r.best) << "\n";
@@ -136,7 +142,7 @@ void cmd_go(Position& pos, std::istringstream& is) {
 
     stop_and_join();                      // ensure no prior search is running
     clear_stop();                         // arm a fresh search BEFORE launching the worker
-    g_worker = std::thread(run_search, std::ref(pos), lim);
+    g_worker = std::thread(run_search, std::ref(pos), lim, g_history);
 }
 
 } // namespace

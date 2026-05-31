@@ -11,6 +11,8 @@
 
 #include <QMainWindow>
 #include <QStringList>
+#include <cstdint>
+#include <unordered_map>
 #include "GuiBoard.h"
 
 class BoardWidget;
@@ -34,6 +36,9 @@ private:
     void setupMenu();
     void tryAutoLoadEngine();
     void requestEngineMove();
+    // Record the current position and, if it's a draw (threefold / 50-move), end
+    // the game. Returns true if the game ended.
+    bool recordPositionAndCheckDraw();
     bool engineToMove() const { return board_.sideToMove() != humanColor_; }
     void log(const QString& s);
     void updateStatus();
@@ -53,4 +58,6 @@ private:
 
     bool engineThinking_ = false;   // a search request is outstanding
     int  pendingDiscards_ = 0;      // stale bestmoves (from aborted searches) to ignore
+
+    std::unordered_map<std::uint64_t, int> posCount_;  // occurrences per position (threefold)
 };

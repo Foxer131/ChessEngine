@@ -30,6 +30,9 @@ public:
 
     Color sideToMove() const;
 
+    std::uint64_t key() const;       // Zobrist key (for repetition detection)
+    int halfmoveClock() const;       // plies since last pawn move/capture (50-move rule)
+
     // Does (file,rank) hold a piece of the side to move?
     bool isOwnPiece(int file, int rank) const;
 

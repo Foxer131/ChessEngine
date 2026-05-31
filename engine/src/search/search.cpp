@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <vector>
 
 namespace chess {
 namespace {
@@ -82,7 +83,23 @@ struct Searcher {
     Move killers[MAX_PLY][2] = {};
     int  history[COLOR_NB][SQUARE_NB][SQUARE_NB] = {};
 
+    // Zobrist keys of all positions on the current line (game history + search
+    // path). Invariant: back() == pos.key() at every node. Used for repetitions.
+    std::vector<std::uint64_t> repList;
+
     Searcher(Position& p, const SearchLimits& l) : pos(p), limits(l) {}
+
+    // Draw by the 50-move rule or by repetition. In search a single repetition is
+    // treated as a draw (if we can repeat once we can repeat again).
+    bool is_draw() const {
+        if (pos.halfmove_clock() >= 100) return true;
+        const int n = static_cast<int>(repList.size());
+        const std::uint64_t cur = repList.back();      // == pos.key()
+        const int limit = std::min(pos.halfmove_clock(), n - 1);
+        for (int d = 2; d <= limit; d += 2)            // same side to move = 2 plies apart
+            if (repList[n - 1 - d] == cur) return true;
+        return false;
+    }
 
     bool out_of_time() {
         if (stop) return true;
@@ -167,6 +184,8 @@ struct Searcher {
         if (out_of_time()) return 0;
         ++nodes;
 
+        if (ply > 0 && is_draw()) return 0;          // repetition / 50-move = draw
+
         const bool root    = (ply == 0);
         const bool inCheck = pos.in_check();
         if (inCheck) ++depth;                       // check extension
@@ -204,7 +223,9 @@ struct Searcher {
             int R = 2 + depth / 6;
             Position::Undo u;
             pos.make_null_move(u);
+            repList.push_back(pos.key());
             int score = -negamax(depth - 1 - R, -beta, -beta + 1, ply + 1);
+            repList.pop_back();
             pos.unmake_null_move(u);
             if (stop) return 0;
             if (score >= beta) return beta;
@@ -245,6 +266,8 @@ struct Searcher {
                 }
             }
 
+            repList.push_back(pos.key());
+
             int score;
             if (moveCount == 1) {
                 score = -negamax(depth - 1, -beta, -alpha, ply + 1);   // PV: full window
@@ -263,6 +286,7 @@ struct Searcher {
                     score = -negamax(depth - 1, -beta, -alpha, ply + 1);       // re-search full window
             }
 
+            repList.pop_back();
             pos.unmake_move(m, u);
             if (stop) return 0;
 
@@ -331,11 +355,15 @@ struct Searcher {
 
 } // namespace
 
-SearchResult search(Position& pos, const SearchLimits& limits) {
+SearchResult search(Position& pos, const SearchLimits& limits,
+                    const std::vector<std::uint64_t>& history) {
     // NOTE: does NOT clear g_stop - the caller must clear_stop() beforehand on
     // the controlling thread (see search.hpp), to avoid racing a `stop`.
     std::memset(g_tt, 0, sizeof(g_tt));
     Searcher s(pos, limits);
+    // Seed the repetition list with the game history (its last key is pos.key()).
+    if (history.empty()) s.repList = { pos.key() };
+    else                 s.repList = history;
     return s.go();
 }
 

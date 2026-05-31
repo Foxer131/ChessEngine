@@ -113,6 +113,8 @@ void MainWindow::newGame() {
 
     board_.reset();
     moves_.clear();
+    posCount_.clear();
+    ++posCount_[board_.key()];   // the start position counts as one occurrence
     gameActive_ = true;
 
     boardView_->setOrientation(humanColor_);
@@ -152,6 +154,7 @@ void MainWindow::onMoveRequested(int fromFile, int fromRank, int toFile, int toR
     boardView_->setLastMove(fromFile, fromRank, toFile, toRank);
     boardView_->setBoard(&board_);
     log(tr("> %1").arg(uci));
+    if (recordPositionAndCheckDraw()) return;
 
     if (gameActive_ && engine_->isRunning() && engineToMove()) {
         boardView_->setInputEnabled(false);
@@ -165,6 +168,21 @@ void MainWindow::requestEngineMove() {
     engineThinking_ = true;
     engine_->searchFromStart(moves_, useMovetime_ ? 0 : depth_,
                              useMovetime_ ? movetimeMs_ : 0);
+}
+
+bool MainWindow::recordPositionAndCheckDraw() {
+    int count = ++posCount_[board_.key()];
+    QString reason;
+    if (count >= 3)                          reason = tr("Draw by threefold repetition.");
+    else if (board_.halfmoveClock() >= 100)  reason = tr("Draw by the fifty-move rule.");
+    if (reason.isEmpty()) return false;
+
+    gameActive_ = false;
+    boardView_->setInputEnabled(false);
+    log(reason);
+    QMessageBox::information(this, tr("Game over"), reason);
+    updateStatus();
+    return true;
 }
 
 void MainWindow::onBestMove(const QString& uci) {
@@ -192,8 +210,9 @@ void MainWindow::onBestMove(const QString& uci) {
     moves_ << uci;
     boardView_->setLastMove(fromF, fromR, toF, toR);
     boardView_->setBoard(&board_);
-    boardView_->setInputEnabled(true);
     log(tr("< %1").arg(uci));
+    if (recordPositionAndCheckDraw()) return;
+    boardView_->setInputEnabled(true);
     updateStatus();
 }
 

@@ -51,6 +51,9 @@ GuiBoard::Color GuiBoard::sideToMove() const {
     return pos_.side_to_move() == chess::WHITE ? Color::White : Color::Black;
 }
 
+std::uint64_t GuiBoard::key() const { return pos_.key(); }
+int GuiBoard::halfmoveClock() const { return pos_.halfmove_clock(); }
+
 bool GuiBoard::isOwnPiece(int file, int rank) const {
     chess::Piece pc = pos_.piece_on(sq(file, rank));
     return pc != chess::NO_PIECE && chess::color_of(pc) == pos_.side_to_move();

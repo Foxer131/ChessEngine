@@ -8,6 +8,7 @@
 // =============================================================================
 
 #include <cstdint>
+#include <vector>
 #include "chess/position.hpp"
 #include "chess/move.hpp"
 
@@ -27,7 +28,10 @@ struct SearchResult {
 };
 
 // Search `pos` under `limits` and return the best move. `pos` is left unchanged.
-SearchResult search(Position& pos, const SearchLimits& limits);
+// `history` is the Zobrist keys of every position in the game so far (its last
+// element must be pos.key()); it lets the search score repetitions as draws.
+SearchResult search(Position& pos, const SearchLimits& limits,
+                    const std::vector<std::uint64_t>& history = {});
 
 // Ask the running search to abort as soon as possible (thread-safe). The search
 // returns its best result so far. Used to implement UCI `stop` / start-over.

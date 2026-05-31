@@ -73,8 +73,24 @@ void BoardWidget::paintEvent(QPaintEvent*) {
             if (board_) {
                 char piece = board_->at(file, rank);
                 if (piece != '.') {
-                    g.setPen(GuiBoard::isWhite(piece) ? Qt::white : Qt::black);
-                    g.drawText(r, Qt::AlignCenter, GuiBoard::glyph(piece));
+                    // Always render the SOLID glyph (the lowercase forms are the
+                    // filled ones), then fill + a contrasting outline so white
+                    // pieces stand out on light squares.
+                    const bool white = GuiBoard::isWhite(piece);
+                    const QString sym = GuiBoard::glyph(QChar(piece).toLower().toLatin1());
+                    const QColor fill    = white ? QColor(0xF6, 0xF6, 0xF4)
+                                                 : QColor(0x1C, 0x1C, 0x1C);
+                    const QColor outline = white ? QColor(0x10, 0x10, 0x10)
+                                                 : QColor(0xD0, 0xD0, 0xD0);
+                    const int o = qMax(1, cell / 28);
+                    g.setPen(outline);
+                    for (int dx = -1; dx <= 1; ++dx)
+                        for (int dy = -1; dy <= 1; ++dy)
+                            if (dx || dy)
+                                g.drawText(r.translated(dx * o, dy * o),
+                                           Qt::AlignCenter, sym);
+                    g.setPen(fill);
+                    g.drawText(r, Qt::AlignCenter, sym);
                 }
             }
         }

@@ -169,6 +169,7 @@ int main() {
             std::cout << "id author Joao\n";
             std::cout << "option name OwnBook type check default true\n";
             std::cout << "option name Threads type spin default 1 min 1 max 256\n";
+            std::cout << "option name Hash type spin default 16 min 1 max 4096\n";
             std::cout << "uciok\n" << std::flush;
         } else if (cmd == "isready") {
             std::lock_guard<std::mutex> lk(g_cout);
@@ -181,6 +182,7 @@ int main() {
             }
             if      (name == "OwnBook") g_own_book = (value == "true");
             else if (name == "Threads") g_threads = std::max(1, std::atoi(value.c_str()));
+            else if (name == "Hash")    tt_resize(std::atoi(value.c_str()));
         } else if (cmd == "ucinewgame") {
             stop_and_join();
             tt_clear();

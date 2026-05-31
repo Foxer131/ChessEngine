@@ -47,4 +47,7 @@ void clear_stop();
 // across moves, since entries are validated by key).
 void tt_clear();
 
+// Resize the transposition table to `mb` megabytes (clears it). UCI Hash option.
+void tt_resize(int mb);
+
 } // namespace chess

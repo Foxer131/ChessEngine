@@ -74,14 +74,23 @@ struct TTEntry {
 // like a miss or is caught by the key check - acceptable for Lazy SMP.
 class TranspositionTable {
 public:
-    static constexpr std::size_t SIZE = 1 << 20;       // ~16 MB, power of two
+    TranspositionTable() { resize(16); }   // 16 MB default (UCI Hash option)
 
-    TranspositionTable() : table_(SIZE) {}
+    // (Re)allocate to the largest power-of-two entry count fitting in `mb`
+    // megabytes, and clear. A bigger table = fewer collisions, which matters more
+    // the deeper / more-threaded the search (many threads hammering one TT).
+    void resize(std::size_t mb) {
+        std::size_t n = (mb * 1024 * 1024) / sizeof(TTEntry);
+        std::size_t p = 1;
+        while ((p << 1) <= n) p <<= 1;     // round down to a power of two
+        table_.assign(p, TTEntry{});
+        mask_ = table_.size() - 1;
+    }
 
     void clear() { std::fill(table_.begin(), table_.end(), TTEntry{}); }
 
     TTEntry* probe(std::uint64_t key, bool& hit) {
-        TTEntry* e = &table_[key & (SIZE - 1)];
+        TTEntry* e = &table_[key & mask_];
         hit = (e->key == key);
         return e;
     }
@@ -89,12 +98,13 @@ public:
     // Pull the bucket into cache ahead of the probe (hardware prefetch).
     void prefetch(std::uint64_t key) const {
 #if defined(__GNUC__) || defined(__clang__)
-        __builtin_prefetch(&table_[key & (SIZE - 1)]);
+        __builtin_prefetch(&table_[key & mask_]);
 #endif
     }
 
 private:
     std::vector<TTEntry> table_;
+    std::size_t          mask_ = 0;
 };
 
 TranspositionTable g_tt;   // the single shared table (kept across moves)
@@ -476,13 +486,16 @@ struct Worker {
             }
         }
 
-        // Store in the transposition table.
+        // Store in the transposition table. Depth-preferred replacement: keep a
+        // deeper entry for the same position, but always take over a slot holding
+        // a different position, and always record an exact score.
         Bound flag = (bestScore <= origAlpha) ? BOUND_UPPER
                    : (bestScore >= beta)       ? BOUND_LOWER
                                                : BOUND_EXACT;
-        *tte = TTEntry{ pos.key(), bestMove,
-                        static_cast<std::int16_t>(to_tt(bestScore, ply)),
-                        static_cast<std::int8_t>(depth), static_cast<std::uint8_t>(flag) };
+        if (tte->key != pos.key() || depth >= tte->depth || flag == BOUND_EXACT)
+            *tte = TTEntry{ pos.key(), bestMove,
+                            static_cast<std::int16_t>(to_tt(bestScore, ply)),
+                            static_cast<std::int8_t>(depth), static_cast<std::uint8_t>(flag) };
         return bestScore;
     }
 
@@ -563,6 +576,8 @@ SearchResult search(Position& pos, const SearchLimits& limits,
 }
 
 void tt_clear() { g_tt.clear(); }
+
+void tt_resize(int mb) { g_tt.resize(static_cast<std::size_t>(std::max(1, mb))); }
 
 void stop_search()  { g_stop.store(true,  std::memory_order_relaxed); }
 void clear_stop()   { g_stop.store(false, std::memory_order_relaxed); }

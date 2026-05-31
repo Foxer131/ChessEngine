@@ -1,5 +1,7 @@
 #include "UciEngine.h"
 
+#include <QThread>
+
 UciEngine::UciEngine(QObject* parent) : QObject(parent) {
     proc_.setProcessChannelMode(QProcess::MergedChannels);
     connect(&proc_, &QProcess::readyReadStandardOutput, this, &UciEngine::onReadyRead);
@@ -18,6 +20,13 @@ bool UciEngine::start(const QString& enginePath) {
         return false;
     }
     send(QStringLiteral("uci"));
+
+    // Use the hardware: run Lazy SMP on all but one core (leave one for the GUI
+    // and OS). Engines that don't know the Threads option just ignore it.
+    const int cores = QThread::idealThreadCount();
+    const int threads = cores > 1 ? cores - 1 : 1;
+    send(QStringLiteral("setoption name Threads value %1").arg(threads));
+
     send(QStringLiteral("isready"));
     return true;
 }

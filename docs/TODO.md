@@ -37,15 +37,16 @@ Zobrist), **draw detection** (threefold + 50-move, in search and GUI), Qt GUI
       `generate_legal` does make/unmake per pseudo-move to test legality (~2x
       work). Generate only legal moves directly (compute pinned pieces + check
       evasions). Substantial, bug-prone rewrite — **re-validate with perft**.
-- [ ] **Lazy SMP (multithreading)** — use all cores; ~+70-100 Elo per core
-      doubling at first. Design: N threads search the same position, **sharing
-      the global TT** (lockless: tolerate torn writes, key validates reads);
-      each thread gets its **own `Position` copy + killers/history**. UCI option
-      `Threads`. Main thread returns the move; on finish, `stop_search()` halts
-      helpers, then join. Note the `g_stop`/`clear_stop` contract (clear on the
-      controlling thread before launching). Likely change `Searcher` to hold
-      `Position` by value. Concurrency change — dedicated session + careful tests
-      (Threads=1 must stay identical).
+- [x] **Lazy SMP (multithreading)** — DONE (branch `experiment/hardware-smp`).
+      N `Worker`s search the same root sharing only a `TranspositionTable`
+      (lockless: key-validated, torn writes tolerated). Each Worker owns its
+      Position copy + history/killers/counters + repetition list. Shared things
+      are injected by reference via `SharedState` (constructor injection) — so
+      **adding a new heuristic is a Worker field, never a concurrency problem**.
+      UCI option `Threads`; the GUI sets it to cores-1. Threads=1 is bit-identical
+      to the old search (verified by equal node counts). Measured +2 depth at
+      fixed time with 8 threads. *Future search heuristics should keep landing on
+      `Worker` so they stay thread-agnostic.*
 
 ## Features
 - [ ] **Polyglot `.bin` book support** — to use downloadable books. Requires

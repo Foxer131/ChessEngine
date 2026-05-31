@@ -7,13 +7,33 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
-#include <cstring>
+#include <memory>
+#include <thread>
 #include <vector>
+
+// =============================================================================
+// Architecture (designed so multithreading does NOT make later changes harder):
+//
+//   TranspositionTable - the ONE component shared between threads. Lockless:
+//                        entries are validated by key, torn writes are tolerated.
+//   SharedState        - everything shared, injected by reference into each
+//                        Worker (the TT, the limits, the stop flag, the game
+//                        history). Constructor injection = dependency injection.
+//   Worker             - all PER-THREAD mutable state (its own Position copy,
+//                        history/killers/counters, repetition list, node count)
+//                        plus the search itself as methods. N threads = N Workers.
+//
+// Because every search heuristic lives on Worker (per-thread) and the only shared
+// object is the TT (accessed through a narrow lockless interface), adding a new
+// heuristic never requires reasoning about concurrency: just add a field to
+// Worker. Threads=1 instantiates exactly one Worker and is identical to the old
+// single-threaded search.
+// =============================================================================
 
 namespace chess {
 namespace {
 
-// Set from another thread (the UCI loop) to abort the running search.
+// The external abort flag (UCI `stop` / start-over). Injected into SharedState.
 std::atomic<bool> g_stop{false};
 
 constexpr int INF         = 32000;
@@ -45,12 +65,39 @@ struct TTEntry {
     std::uint64_t key   = 0;
     Move          move  = MOVE_NONE;
     std::int16_t  score = 0;
-    std::int8_t   depth = 0;       // all-zero default keeps g_tt in .bss (no 16MB
-    std::uint8_t  bound = BOUND_NONE;  // in the binary); empty slots are found via key mismatch
+    std::int8_t   depth = 0;
+    std::uint8_t  bound = BOUND_NONE;
 };
 
-constexpr std::size_t TT_SIZE = 1 << 20;       // ~16 MB, power of two
-TTEntry g_tt[TT_SIZE];
+// The shared, lockless transposition table. One bucket per key (always-replace).
+// Reads are validated by the full key, so a torn concurrent write just looks
+// like a miss or is caught by the key check - acceptable for Lazy SMP.
+class TranspositionTable {
+public:
+    static constexpr std::size_t SIZE = 1 << 20;       // ~16 MB, power of two
+
+    TranspositionTable() : table_(SIZE) {}
+
+    void clear() { std::fill(table_.begin(), table_.end(), TTEntry{}); }
+
+    TTEntry* probe(std::uint64_t key, bool& hit) {
+        TTEntry* e = &table_[key & (SIZE - 1)];
+        hit = (e->key == key);
+        return e;
+    }
+
+    // Pull the bucket into cache ahead of the probe (hardware prefetch).
+    void prefetch(std::uint64_t key) const {
+#if defined(__GNUC__) || defined(__clang__)
+        __builtin_prefetch(&table_[key & (SIZE - 1)]);
+#endif
+    }
+
+private:
+    std::vector<TTEntry> table_;
+};
+
+TranspositionTable g_tt;   // the single shared table (kept across moves)
 
 // Mate scores are stored relative to the node (not the root), so the same entry
 // is valid at any ply: shift by `ply` on store and unshift on probe.
@@ -72,9 +119,9 @@ bool has_non_pawn_material(const Position& p, Color c) {
 
 // Static Exchange Evaluation: the material swing if the capture `m` is followed
 // by the best sequence of recaptures on its target square (swap algorithm). A
-// negative result means the capture loses material. Used to skip losing captures
-// in quiescence. attackers_to is recomputed with an updated occupancy each step,
-// which naturally reveals X-ray attackers behind a moved piece.
+// negative result means the capture loses material. attackers_to is recomputed
+// with an updated occupancy each step, which naturally reveals X-ray attackers.
+// Pure function of the position - no per-thread state, safe to share.
 int see(const Position& pos, Move m) {
     const Square from = m.from_sq();
     const Square to   = m.to_sq();
@@ -123,12 +170,21 @@ int see(const Position& pos, Move m) {
     return gain[0];
 }
 
-// ---- The searcher ------------------------------------------------------------
-struct Searcher {
-    Position&     pos;
-    SearchLimits  limits;
+// ---- Shared state: injected (by reference) into every Worker -----------------
+struct SharedState {
+    TranspositionTable&                tt;
+    const SearchLimits&                limits;
+    std::atomic<bool>&                 stop;        // external abort + helper halt
+    const std::vector<std::uint64_t>&  gameHistory; // repetition seed (read-only)
+};
+
+// ---- The Worker: all per-thread state + the search ---------------------------
+struct Worker {
+    SharedState&  shared;
+    Position      pos;                 // this thread's OWN copy of the root
+    int           threadId;
     std::uint64_t nodes = 0;
-    bool          stop  = false;
+    bool          stop  = false;       // sticky local copy of the abort decision
     std::chrono::steady_clock::time_point start;
 
     Move rootBest = MOVE_NONE;
@@ -136,15 +192,19 @@ struct Searcher {
     Move killers[MAX_PLY][2] = {};
     int  history[COLOR_NB][SQUARE_NB][SQUARE_NB] = {};
     // Counter-move heuristic: the quiet move that last refuted the opponent's
-    // previous move (indexed by our side + that move's from/to). Tried right
-    // after the killers in move ordering.
+    // previous move (indexed by our side + that move's from/to).
     Move counterMove[COLOR_NB][SQUARE_NB][SQUARE_NB] = {};
 
     // Zobrist keys of all positions on the current line (game history + search
     // path). Invariant: back() == pos.key() at every node. Used for repetitions.
     std::vector<std::uint64_t> repList;
 
-    Searcher(Position& p, const SearchLimits& l) : pos(p), limits(l) {}
+    Worker(SharedState& s, const Position& root, int id)
+        : shared(s), pos(root), threadId(id) {
+        if (shared.gameHistory.empty()) repList = { pos.key() };
+        else                            repList = shared.gameHistory;
+        repList.reserve(repList.size() + MAX_PLY + 4);   // no reallocation mid-search
+    }
 
     // Draw by the 50-move rule or by repetition. In search a single repetition is
     // treated as a draw (if we can repeat once we can repeat again).
@@ -160,12 +220,12 @@ struct Searcher {
 
     bool out_of_time() {
         if (stop) return true;
-        if (g_stop.load(std::memory_order_relaxed)) { stop = true; return true; }
-        if (limits.max_nodes && nodes >= limits.max_nodes) { stop = true; return true; }
-        if (limits.movetime_ms > 0 && (nodes & 2047) == 0) {
+        if (shared.stop.load(std::memory_order_relaxed)) { stop = true; return true; }
+        if (shared.limits.max_nodes && nodes >= shared.limits.max_nodes) { stop = true; return true; }
+        if (shared.limits.movetime_ms > 0 && (nodes & 2047) == 0) {
             auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                           std::chrono::steady_clock::now() - start).count();
-            if (ms >= limits.movetime_ms) { stop = true; return true; }
+            if (ms >= shared.limits.movetime_ms) { stop = true; return true; }
         }
         return false;
     }
@@ -181,9 +241,9 @@ struct Searcher {
         if (victim != NO_PIECE) {  // capture -> MVV-LVA (value victim, cheap attacker first)
             int attacker = type_of(pos.piece_on(m.from_sq()));
             int mvvlva   = PIECE_VAL[type_of(victim)] * 16 - attacker;
-            // Cheap path (Simplicity's trick): a capture by an equal-or-cheaper
-            // piece can't lose material, so skip the SEE call. Otherwise verify;
-            // captures that lose material by SEE sort behind every quiet move.
+            // Cheap path: a capture by an equal-or-cheaper piece can't lose
+            // material, so skip the SEE call. Otherwise verify; captures that lose
+            // material by SEE sort behind every quiet move.
             if (PIECE_VAL[attacker] <= PIECE_VAL[type_of(victim)])
                 return 1'000'000 + mvvlva;
             return (see(pos, m) >= 0 ? 1'000'000 : -1'000'000) + mvvlva;
@@ -261,15 +321,16 @@ struct Searcher {
         if (depth <= 0) return quiesce(alpha, beta, ply);
 
         // Transposition table probe.
-        TTEntry& tte = g_tt[pos.key() & (TT_SIZE - 1)];
+        bool ttHit;
+        TTEntry* tte = shared.tt.probe(pos.key(), ttHit);
         Move ttMove = MOVE_NONE;
-        if (tte.key == pos.key()) {
-            ttMove = tte.move;
-            if (!root && tte.depth >= depth) {
-                int s = from_tt(tte.score, ply);
-                if (tte.bound == BOUND_EXACT) return s;
-                if (tte.bound == BOUND_LOWER && s >= beta)  return s;
-                if (tte.bound == BOUND_UPPER && s <= alpha) return s;
+        if (ttHit) {
+            ttMove = tte->move;
+            if (!root && tte->depth >= depth) {
+                int s = from_tt(tte->score, ply);
+                if (tte->bound == BOUND_EXACT) return s;
+                if (tte->bound == BOUND_LOWER && s >= beta)  return s;
+                if (tte->bound == BOUND_UPPER && s <= alpha) return s;
             }
         }
 
@@ -384,18 +445,21 @@ struct Searcher {
         Bound flag = (bestScore <= origAlpha) ? BOUND_UPPER
                    : (bestScore >= beta)       ? BOUND_LOWER
                                                : BOUND_EXACT;
-        tte = TTEntry{ pos.key(), bestMove,
-                       static_cast<std::int16_t>(to_tt(bestScore, ply)),
-                       static_cast<std::int8_t>(depth), static_cast<std::uint8_t>(flag) };
+        *tte = TTEntry{ pos.key(), bestMove,
+                        static_cast<std::int16_t>(to_tt(bestScore, ply)),
+                        static_cast<std::int8_t>(depth), static_cast<std::uint8_t>(flag) };
         return bestScore;
     }
 
+    // Iterative deepening for this worker. The main worker (threadId 0) drives
+    // the time/depth budget; helper workers loop to the same max depth and exit
+    // when the shared stop flag is raised by the main worker (or the user).
     SearchResult go() {
         start = std::chrono::steady_clock::now();
         SearchResult result;
         int prevScore = 0;
 
-        for (int d = 1; d <= limits.depth && d < MAX_PLY; ++d) {
+        for (int d = 1; d <= shared.limits.depth && d < MAX_PLY; ++d) {
             rootBest = MOVE_NONE;
 
             int alpha = -INF, beta = INF, window = 25;
@@ -432,15 +496,38 @@ SearchResult search(Position& pos, const SearchLimits& limits,
     // NOTE: does NOT clear g_stop (the caller clear_stop()s on the controlling
     // thread) and does NOT clear the TT - entries are validated by key, so they
     // are reused across moves within a game (clear only on ucinewgame).
-    Searcher s(pos, limits);
-    // Seed the repetition list with the game history (its last key is pos.key()).
-    if (history.empty()) s.repList = { pos.key() };
-    else                 s.repList = history;
-    s.repList.reserve(s.repList.size() + MAX_PLY + 4);   // avoid reallocation during search
-    return s.go();
+    SharedState shared{ g_tt, limits, g_stop, history };
+
+    const int nThreads = std::max(1, limits.threads);
+    if (nThreads == 1) {
+        Worker w(shared, pos, 0);
+        return w.go();
+    }
+
+    // Lazy SMP: N workers search the same root, sharing only the TT. Each helper
+    // gets its own Position copy + history tables; their natural divergence (via
+    // TT contention and timing) widens the tree. Helpers run on background
+    // threads; the main worker runs here and owns the reported result.
+    std::vector<std::unique_ptr<Worker>> workers;
+    workers.reserve(nThreads);
+    for (int i = 0; i < nThreads; ++i)
+        workers.push_back(std::make_unique<Worker>(shared, pos, i));
+
+    std::vector<std::thread> helpers;
+    helpers.reserve(nThreads - 1);
+    for (int i = 1; i < nThreads; ++i)
+        helpers.emplace_back([&w = *workers[i]] { w.go(); });
+
+    SearchResult result = workers[0]->go();   // main worker drives the budget
+
+    g_stop.store(true, std::memory_order_relaxed);   // halt helpers...
+    for (auto& t : helpers) t.join();
+    g_stop.store(false, std::memory_order_relaxed);  // ...then disarm (we stopped them, not the user)
+
+    return result;
 }
 
-void tt_clear() { std::memset(g_tt, 0, sizeof(g_tt)); }
+void tt_clear() { g_tt.clear(); }
 
 void stop_search()  { g_stop.store(true,  std::memory_order_relaxed); }
 void clear_stop()   { g_stop.store(false, std::memory_order_relaxed); }

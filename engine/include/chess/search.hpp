@@ -18,6 +18,7 @@ struct SearchLimits {
     int           depth      = 64;  // max iterative-deepening depth
     int           movetime_ms = 0;  // wall-clock budget in ms (0 = no time limit)
     std::uint64_t max_nodes   = 0;  // node budget (0 = no node limit)
+    int           threads     = 1;  // Lazy SMP: number of parallel search threads
 };
 
 struct SearchResult {

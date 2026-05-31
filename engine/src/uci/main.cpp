@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <mutex>
 #include <sstream>
@@ -29,6 +30,7 @@ std::thread g_worker;
 std::mutex  g_cout;   // serializes stdout between the worker and the main thread
 OpeningBook g_book;
 bool        g_own_book = true;
+int         g_threads  = 1;   // Lazy SMP: parallel search threads (UCI option)
 std::vector<std::uint64_t> g_history;   // zobrist keys of the game, for repetition
 
 std::string square_to_uci(Square s) {
@@ -129,6 +131,7 @@ void cmd_go(Position& pos, std::istringstream& is) {
     }
 
     SearchLimits lim;
+    lim.threads = g_threads;
     if (depth > 0)    lim.depth = depth;
     if (movetime > 0) lim.movetime_ms = movetime;
     if (nodes > 0)    lim.max_nodes = static_cast<std::uint64_t>(nodes);
@@ -165,6 +168,7 @@ int main() {
             std::cout << "id name ChessEngine 0.1\n";
             std::cout << "id author Joao\n";
             std::cout << "option name OwnBook type check default true\n";
+            std::cout << "option name Threads type spin default 1 min 1 max 256\n";
             std::cout << "uciok\n" << std::flush;
         } else if (cmd == "isready") {
             std::lock_guard<std::mutex> lk(g_cout);
@@ -175,7 +179,8 @@ int main() {
                 if      (tok == "name")  is >> name;
                 else if (tok == "value") is >> value;
             }
-            if (name == "OwnBook") g_own_book = (value == "true");
+            if      (name == "OwnBook") g_own_book = (value == "true");
+            else if (name == "Threads") g_threads = std::max(1, std::atoi(value.c_str()));
         } else if (cmd == "ucinewgame") {
             stop_and_join();
             tt_clear();

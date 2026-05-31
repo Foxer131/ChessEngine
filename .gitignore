@@ -23,9 +23,16 @@ compile_commands.json
 # Engine assets that shouldn't be committed (large)
 *.nnue
 
+# SPRT harness: built engine binaries + match output (openings book stays tracked)
+/tools/bin/
+/tools/out/
+
 # OS
 Thumbs.db
 .DS_Store
 
 # Claude Code machine-local settings
 .claude/settings.local.json
+
+# fastchess resume file (written to cwd on interrupt)
+config.json

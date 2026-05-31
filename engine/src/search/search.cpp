@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 
 namespace chess {
@@ -21,6 +22,20 @@ constexpr int MAX_PLY     = 128;
 
 // For MVV-LVA ordering and material-aware decisions, indexed by PieceType.
 constexpr int PIECE_VAL[PIECE_TYPE_NB] = {0, 100, 320, 330, 500, 900, 20000};
+
+// Late-move-reduction amounts, indexed [depth][move number]. Deeper searches and
+// later moves get reduced more. Built once at startup.
+struct LmrTable {
+    int r[64][64];
+    LmrTable() {
+        for (int d = 0; d < 64; ++d)
+            for (int m = 0; m < 64; ++m)
+                r[d][m] = (d == 0 || m == 0)
+                            ? 0
+                            : int(0.5 + std::log(double(d)) * std::log(double(m)) / 2.3);
+    }
+};
+const LmrTable LMR;
 
 // ---- Transposition table ----------------------------------------------------
 enum Bound : std::uint8_t { BOUND_NONE, BOUND_EXACT, BOUND_LOWER, BOUND_UPPER };
@@ -129,6 +144,14 @@ struct Searcher {
 
         for (Move m : moves) {
             if (!is_capture(pos, m) && m.type_of() != PROMOTION) continue;  // captures/promos only
+
+            // Delta pruning: if winning this piece (plus a margin) still can't
+            // reach alpha, the capture is hopeless - skip it.
+            PieceType victim = (m.type_of() == EN_PASSANT) ? PAWN
+                                                           : type_of(pos.piece_on(m.to_sq()));
+            int gain = PIECE_VAL[victim] + (m.type_of() == PROMOTION ? 800 : 0);
+            if (standPat + gain + 100 < alpha) continue;
+
             Position::Undo u;
             pos.make_move(m, u);
             int score = -quiesce(-beta, -alpha, ply + 1);
@@ -163,7 +186,15 @@ struct Searcher {
             }
         }
 
-        const Color us = pos.side_to_move();
+        const Color us         = pos.side_to_move();
+        const bool  pvNode     = (beta - alpha) > 1;
+        const int   staticEval = inCheck ? -INF : evaluate(pos);
+
+        // Reverse futility pruning (static null move): if our static eval is so
+        // far above beta that even a generous margin can't pull it under, prune.
+        if (!pvNode && !inCheck && depth <= 6 && beta < MATE_IN_MAX
+            && staticEval - 85 * depth >= beta)
+            return staticEval;
 
         // Null-move pruning: give the opponent a free move; if our position is
         // still good enough to fail high, prune. Skip in check / near-mate /
@@ -194,18 +225,36 @@ struct Searcher {
         for (Move m : moves) {
             ++moveCount;
             const bool capture = is_capture(pos, m);
+            const bool quiet   = !capture && m.type_of() != PROMOTION;
 
             Position::Undo u;
             pos.make_move(m, u);
             const bool givesCheck = pos.in_check();
+
+            // Shallow-depth pruning of quiet moves. The bestScore guard keeps the
+            // first move (and mate lines) safe: nothing is pruned before we have
+            // a real score, and checking moves are never pruned.
+            if (!pvNode && !inCheck && !givesCheck && quiet && bestScore > -MATE_IN_MAX) {
+                if (depth <= 4 && moveCount > 3 + depth * depth) {           // late move pruning
+                    pos.unmake_move(m, u);
+                    continue;
+                }
+                if (depth <= 6 && staticEval + 90 * depth + 50 <= alpha) {   // futility pruning
+                    pos.unmake_move(m, u);
+                    continue;
+                }
+            }
 
             int score;
             if (moveCount == 1) {
                 score = -negamax(depth - 1, -beta, -alpha, ply + 1);   // PV: full window
             } else {
                 int R = 0;  // late move reduction for quiet, non-checking moves
-                if (depth >= 3 && moveCount > 3 && !capture && !givesCheck && !inCheck)
-                    R = (moveCount > 6) ? 2 : 1;
+                if (depth >= 3 && moveCount > 3 && quiet && !givesCheck && !inCheck) {
+                    R = LMR.r[std::min(depth, 63)][std::min(moveCount, 63)];
+                    if (pvNode) --R;
+                    R = std::max(0, std::min(R, depth - 2));
+                }
 
                 score = -negamax(depth - 1 - R, -alpha - 1, -alpha, ply + 1);  // reduced null window
                 if (score > alpha && R > 0)

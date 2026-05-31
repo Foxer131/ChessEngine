@@ -17,6 +17,7 @@
 #include "chess/movegen.hpp"
 #include "chess/movelist.hpp"
 #include "chess/search.hpp"
+#include "chess/book.hpp"
 
 using namespace chess;
 
@@ -24,6 +25,8 @@ namespace {
 
 std::thread g_worker;
 std::mutex  g_cout;   // serializes stdout between the worker and the main thread
+OpeningBook g_book;
+bool        g_own_book = true;
 
 std::string square_to_uci(Square s) {
     std::string r;
@@ -92,6 +95,19 @@ void run_search(Position& pos, SearchLimits lim) {
 
 // go [depth N] [movetime MS] [nodes N] [wtime MS] [btime MS] [infinite]
 void cmd_go(Position& pos, std::istringstream& is) {
+    stop_and_join();   // never decide/print over a running search
+
+    // In book? Play the book move instantly and skip the search.
+    if (g_own_book) {
+        Move bm = g_book.probe(pos);
+        if (bm != MOVE_NONE) {
+            std::lock_guard<std::mutex> lk(g_cout);
+            std::cout << "info string book move\n";
+            std::cout << "bestmove " << move_to_uci(bm) << std::endl;
+            return;
+        }
+    }
+
     int depth = 0, movetime = 0, wtime = 0, btime = 0;
     long long nodes = 0;
     bool infinite = false;
@@ -130,6 +146,7 @@ int main() {
 
     Position pos;
     pos.set_startpos();
+    g_book.build_default();
 
     std::string line;
     while (std::getline(std::cin, line)) {
@@ -141,10 +158,18 @@ int main() {
             std::lock_guard<std::mutex> lk(g_cout);
             std::cout << "id name ChessEngine 0.1\n";
             std::cout << "id author Joao\n";
+            std::cout << "option name OwnBook type check default true\n";
             std::cout << "uciok\n" << std::flush;
         } else if (cmd == "isready") {
             std::lock_guard<std::mutex> lk(g_cout);
             std::cout << "readyok\n" << std::flush;
+        } else if (cmd == "setoption") {
+            std::string tok, name, value;
+            while (is >> tok) {
+                if      (tok == "name")  is >> name;
+                else if (tok == "value") is >> value;
+            }
+            if (name == "OwnBook") g_own_book = (value == "true");
         } else if (cmd == "ucinewgame") {
             stop_and_join();
             pos.set_startpos();

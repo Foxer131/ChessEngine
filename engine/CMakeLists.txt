@@ -15,7 +15,8 @@ file(GLOB_RECURSE CHESS_CORE_SOURCES CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/src/core/*.cpp"
      "${CMAKE_CURRENT_SOURCE_DIR}/src/movegen/*.cpp"
      "${CMAKE_CURRENT_SOURCE_DIR}/src/search/*.cpp"
-     "${CMAKE_CURRENT_SOURCE_DIR}/src/eval/*.cpp")
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/eval/*.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/book/*.cpp")
 
 if(CHESS_CORE_SOURCES)
     add_library(chess_core STATIC ${CHESS_CORE_SOURCES})

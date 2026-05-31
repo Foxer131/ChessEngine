@@ -6,6 +6,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include "chess/book.hpp"
 #include "chess/eval.hpp"
 #include "chess/movegen.hpp"
 #include "chess/position.hpp"
@@ -338,6 +339,24 @@ int main() {
         bool found = false;
         for (Move m : legal) if (m == r.best) found = true;
         CHECK(found);
+    }
+
+    // ---- opening book ----
+    {
+        OpeningBook book;
+        book.build_default();
+        CHECK(!book.empty());
+
+        Position s; s.set_startpos();
+        Move bm = book.probe(s);
+        CHECK(bm != MOVE_NONE);                 // start position is in book
+        MoveList legal; generate_legal(s, legal);
+        bool isLegal = false;
+        for (Move m : legal) if (m == bm) isLegal = true;
+        CHECK(isLegal);                         // and the book move is legal
+
+        Position off; off.set_fen("8/8/8/3k4/8/3K4/8/8 w - - 0 1");  // K vs K: not in book
+        CHECK(book.probe(off) == MOVE_NONE);
     }
 
     if (g_failures == 0)

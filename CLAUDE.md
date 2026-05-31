@@ -5,6 +5,9 @@ A classical, **bitboard-based** chess engine in **modern C++ (C++20)**, plus a
 **Qt** desktop GUI. The engine is a standalone **UCI** process; the GUI is a
 separate process that drives it over UCI. CPU-only — see the GPU note below.
 
+**Next steps / open work: see [docs/TODO.md](docs/TODO.md)** (prioritized, with
+implementation notes). docs/ROADMAP.md is the original build order.
+
 ## Decisions already made (don't re-litigate without the user)
 - **Paradigm:** classical alpha-beta + bitboards (Stockfish-style), CPU.
   NOT neural-MCTS. NNUE eval is a possible *later* addition (still CPU/int16).

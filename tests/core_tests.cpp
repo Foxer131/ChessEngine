@@ -15,6 +15,7 @@
 #include "chess/move.hpp"
 #include "chess/movelist.hpp"
 #include "chess/attacks.hpp"
+#include "chess/nnue.hpp"
 
 using namespace chess;
 
@@ -70,6 +71,20 @@ static_assert(Move::make(SQ_E7, SQ_E8, PROMOTION, QUEEN).promotion_type() == QUE
 static_assert(Move::make(SQ_E1, SQ_G1, CASTLING).type_of() == CASTLING);
 static_assert(Move::make(SQ_D5, SQ_E6, EN_PASSANT).type_of() == EN_PASSANT);
 static_assert(MOVE_NONE.raw() == 0);
+
+// nnue.hpp - feature indexing range + the two perspective/mirror symmetries (the
+// easiest thing to get wrong: black's view is the board mirrored vertically, with
+// colours swapped into own/enemy buckets).
+static_assert(nnue::feature_index(WHITE, WHITE, PAWN, SQ_A1) == 0);
+static_assert(nnue::feature_index(WHITE, BLACK, PAWN, SQ_A1) == 384);     // enemy bucket
+static_assert(nnue::feature_index(BLACK, WHITE, KING, SQ_H8) >= 0
+           && nnue::feature_index(BLACK, WHITE, KING, SQ_H8) < nnue::INPUT_DIM);
+// Own piece on own corner is the same feature from either perspective:
+static_assert(nnue::feature_index(WHITE, WHITE, PAWN, SQ_A1)
+           == nnue::feature_index(BLACK, BLACK, PAWN, SQ_A8));
+// Enemy piece mirrors vertically between the two perspectives:
+static_assert(nnue::feature_index(WHITE, BLACK, KNIGHT, SQ_E4)
+           == nnue::feature_index(BLACK, WHITE, KNIGHT, SQ_E5));
 
 } // namespace compile_time
 

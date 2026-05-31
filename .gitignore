@@ -20,8 +20,11 @@ compile_commands.json
 *.lib
 *.pdb
 
-# Engine assets that shouldn't be committed (large)
-*.nnue
+# Engine assets that shouldn't be committed (large network files).
+# NB: anchor to the file extension only via a leading dir/glob so it can't match
+# source like nnue.hpp - keep trained nets under nets/ or name them *.nnue.bin.
+nets/
+*.nnue.bin
 
 # SPRT harness: built engine binaries + match output (openings book stays tracked)
 /tools/bin/

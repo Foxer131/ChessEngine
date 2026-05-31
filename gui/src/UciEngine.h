@@ -21,6 +21,8 @@ public:
     void stop();
     bool isRunning() const;
 
+    void newGame();   // tell the engine a new game is starting (ucinewgame)
+
     // Set the position from the start position plus a list of UCI moves, then
     // ask the engine to search. Exactly one of depth/movetimeMs should be > 0.
     void searchFromStart(const QStringList& moves, int depth, int movetimeMs);

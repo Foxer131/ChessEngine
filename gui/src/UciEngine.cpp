@@ -35,6 +35,10 @@ bool UciEngine::isRunning() const {
     return proc_.state() != QProcess::NotRunning;
 }
 
+void UciEngine::newGame() {
+    send(QStringLiteral("ucinewgame"));
+}
+
 void UciEngine::searchFromStart(const QStringList& moves, int depth, int movetimeMs) {
     QString pos = QStringLiteral("position startpos");
     if (!moves.isEmpty())

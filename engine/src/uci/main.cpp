@@ -178,6 +178,7 @@ int main() {
             if (name == "OwnBook") g_own_book = (value == "true");
         } else if (cmd == "ucinewgame") {
             stop_and_join();
+            tt_clear();
             pos.set_startpos();
         } else if (cmd == "position") {
             stop_and_join();            // don't mutate the board under the worker

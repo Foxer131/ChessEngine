@@ -42,4 +42,8 @@ void stop_search();
 // the search thread, or a `stop` that arrives just after launch could be lost.
 void clear_stop();
 
+// Empty the transposition table. Call on a new game (the TT is otherwise kept
+// across moves, since entries are validated by key).
+void tt_clear();
+
 } // namespace chess

@@ -70,6 +70,59 @@ bool has_non_pawn_material(const Position& p, Color c) {
           | p.pieces(c, ROOK)   | p.pieces(c, QUEEN)) != 0;
 }
 
+// Static Exchange Evaluation: the material swing if the capture `m` is followed
+// by the best sequence of recaptures on its target square (swap algorithm). A
+// negative result means the capture loses material. Used to skip losing captures
+// in quiescence. attackers_to is recomputed with an updated occupancy each step,
+// which naturally reveals X-ray attackers behind a moved piece.
+int see(const Position& pos, Move m) {
+    const Square from = m.from_sq();
+    const Square to   = m.to_sq();
+    const bool   ep   = (m.type_of() == EN_PASSANT);
+
+    PieceType victim = ep ? PAWN : type_of(pos.piece_on(to));
+    if (victim == NO_PIECE_TYPE) return 0;   // not a capture
+
+    int gain[32];
+    int d = 0;
+    gain[0] = PIECE_VAL[victim];
+
+    PieceType aPiece  = type_of(pos.piece_on(from));   // piece left standing on `to`
+    Bitboard  fromSet = square_bb(from);
+    Bitboard  occ     = pos.pieces();
+    if (ep) occ ^= square_bb(Square(pos.side_to_move() == WHITE ? to - 8 : to + 8));
+
+    Color side = ~pos.side_to_move();        // side to recapture
+
+    while (true) {
+        ++d;
+        gain[d] = PIECE_VAL[aPiece] - gain[d - 1];
+        if (std::max(-gain[d - 1], gain[d]) < 0) break;   // even optimistically losing
+
+        occ ^= fromSet;                                    // the capturer leaves its square
+        Bitboard attackers = pos.attackers_to(to, occ) & occ;
+        Bitboard mine = attackers & pos.pieces(side);
+        if (!mine) break;
+
+        PieceType pt = PAWN;                               // least valuable attacker
+        Bitboard sel = 0;
+        for (; pt <= KING; pt = PieceType(pt + 1)) {
+            sel = mine & pos.pieces(pt);
+            if (sel) break;
+        }
+        if (pt == KING && (attackers & pos.pieces(~side)))
+            break;                                         // king can't recapture into check
+
+        fromSet = sel & (0ULL - sel);                      // one (lowest) attacker
+        aPiece  = pt;
+        side    = ~side;
+    }
+
+    while (--d > 0)
+        gain[d - 1] = -std::max(-gain[d - 1], gain[d]);
+    return gain[0];
+}
+
 // ---- The searcher ------------------------------------------------------------
 struct Searcher {
     Position&     pos;
@@ -168,6 +221,9 @@ struct Searcher {
                                                            : type_of(pos.piece_on(m.to_sq()));
             int gain = PIECE_VAL[victim] + (m.type_of() == PROMOTION ? 800 : 0);
             if (standPat + gain + 100 < alpha) continue;
+
+            // Skip captures that lose material by static exchange evaluation.
+            if (is_capture(pos, m) && see(pos, m) < 0) continue;
 
             Position::Undo u;
             pos.make_move(m, u);
@@ -357,15 +413,18 @@ struct Searcher {
 
 SearchResult search(Position& pos, const SearchLimits& limits,
                     const std::vector<std::uint64_t>& history) {
-    // NOTE: does NOT clear g_stop - the caller must clear_stop() beforehand on
-    // the controlling thread (see search.hpp), to avoid racing a `stop`.
-    std::memset(g_tt, 0, sizeof(g_tt));
+    // NOTE: does NOT clear g_stop (the caller clear_stop()s on the controlling
+    // thread) and does NOT clear the TT - entries are validated by key, so they
+    // are reused across moves within a game (clear only on ucinewgame).
     Searcher s(pos, limits);
     // Seed the repetition list with the game history (its last key is pos.key()).
     if (history.empty()) s.repList = { pos.key() };
     else                 s.repList = history;
+    s.repList.reserve(s.repList.size() + MAX_PLY + 4);   // avoid reallocation during search
     return s.go();
 }
+
+void tt_clear() { std::memset(g_tt, 0, sizeof(g_tt)); }
 
 void stop_search()  { g_stop.store(true,  std::memory_order_relaxed); }
 void clear_stop()   { g_stop.store(false, std::memory_order_relaxed); }

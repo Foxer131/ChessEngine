@@ -111,6 +111,8 @@ void MainWindow::newGame() {
         engineThinking_ = false;
     }
 
+    if (engine_->isRunning()) engine_->newGame();   // clears the engine's TT
+
     board_.reset();
     moves_.clear();
     posCount_.clear();

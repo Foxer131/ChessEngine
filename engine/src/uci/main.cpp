@@ -1,14 +1,17 @@
 // =============================================================================
-// UCI front-end: a thin loop translating the UCI protocol to/from the engine.
-// The GUI (or Cutechess/Arena) launches this executable and speaks UCI over
-// stdin/stdout. The engine itself is stateless per command - `position`
-// rebuilds the board from scratch, so we never drift out of sync.
+// UCI front-end. The search runs on a WORKER THREAD so the main thread keeps
+// reading stdin and can abort it (`stop`, or starting a new game mid-search)
+// via stop_search(). This is what makes "New Game while the engine is thinking"
+// responsive instead of freezing until the old search finishes.
 // =============================================================================
 
 #include <algorithm>
+#include <atomic>
 #include <iostream>
+#include <mutex>
 #include <sstream>
 #include <string>
+#include <thread>
 
 #include "chess/position.hpp"
 #include "chess/movegen.hpp"
@@ -19,6 +22,9 @@ using namespace chess;
 
 namespace {
 
+std::thread g_worker;
+std::mutex  g_cout;   // serializes stdout between the worker and the main thread
+
 std::string square_to_uci(Square s) {
     std::string r;
     r += char('a' + file_of(s));
@@ -26,24 +32,28 @@ std::string square_to_uci(Square s) {
     return r;
 }
 
-// Long-algebraic UCI string for a move, e.g. "e2e4", "e1g1" (castling),
-// "e7e8q" (promotion).
 std::string move_to_uci(Move m) {
     if (m == MOVE_NONE) return "0000";
     std::string s = square_to_uci(m.from_sq()) + square_to_uci(m.to_sq());
     if (m.type_of() == PROMOTION)
-        s += "  nbrq"[m.promotion_type()];  // PieceType KNIGHT..QUEEN -> n b r q
+        s += "  nbrq"[m.promotion_type()];
     return s;
 }
 
-// Match a UCI token to one of the legal moves (handles castling / ep / promotion
-// because the legal move already carries the right type).
 Move find_move(Position& pos, const std::string& uci) {
     MoveList list;
     generate_legal(pos, list);
     for (Move m : list)
         if (move_to_uci(m) == uci) return m;
     return MOVE_NONE;
+}
+
+// Abort and join any in-progress search (no-op if idle).
+void stop_and_join() {
+    if (g_worker.joinable()) {
+        stop_search();
+        g_worker.join();
+    }
 }
 
 // position [startpos | fen <6 fields>] [moves <m1> <m2> ...]
@@ -65,10 +75,19 @@ void cmd_position(Position& pos, std::istringstream& is) {
     while (is >> token) {
         if (token == "moves") continue;
         Move m = find_move(pos, token);
-        if (m == MOVE_NONE) break;  // illegal/garbage token
+        if (m == MOVE_NONE) break;
         Position::Undo u;
         pos.make_move(m, u);
     }
+}
+
+// The worker body: search, then print info + bestmove (under the cout lock).
+void run_search(Position& pos, SearchLimits lim) {
+    SearchResult r = search(pos, lim);
+    std::lock_guard<std::mutex> lk(g_cout);
+    std::cout << "info depth " << r.depth << " score cp " << r.score
+              << " nodes " << r.nodes << " pv " << move_to_uci(r.best) << "\n";
+    std::cout << "bestmove " << move_to_uci(r.best) << std::endl;
 }
 
 // go [depth N] [movetime MS] [nodes N] [wtime MS] [btime MS] [infinite]
@@ -85,26 +104,23 @@ void cmd_go(Position& pos, std::istringstream& is) {
         else if (token == "wtime")    is >> wtime;
         else if (token == "btime")    is >> btime;
         else if (token == "infinite") infinite = true;
-        // winc/binc/movestogo/ponder and their values are ignored
     }
 
-    SearchLimits lim;  // defaults: depth 64, no time/node cap
+    SearchLimits lim;
     if (depth > 0)    lim.depth = depth;
     if (movetime > 0) lim.movetime_ms = movetime;
     if (nodes > 0)    lim.max_nodes = static_cast<std::uint64_t>(nodes);
-    if (infinite)     lim.depth = 12;  // we search synchronously; cap to stay responsive
+    if (infinite)     lim.depth = 64;   // bounded by `stop` now, so this is safe
 
     if (depth == 0 && movetime == 0 && nodes == 0 && !infinite) {
         int myTime = (pos.side_to_move() == WHITE) ? wtime : btime;
-        if (myTime > 0) lim.movetime_ms = std::max(10, myTime / 30);  // simple budget
-        else            lim.depth = 8;                                // sane default
+        if (myTime > 0) lim.movetime_ms = std::max(10, myTime / 30);
+        else            lim.depth = 8;
     }
 
-    SearchResult r = search(pos, lim);
-
-    std::cout << "info depth " << r.depth << " score cp " << r.score
-              << " nodes " << r.nodes << " pv " << move_to_uci(r.best) << "\n";
-    std::cout << "bestmove " << move_to_uci(r.best) << std::endl;
+    stop_and_join();                      // ensure no prior search is running
+    clear_stop();                         // arm a fresh search BEFORE launching the worker
+    g_worker = std::thread(run_search, std::ref(pos), lim);
 }
 
 } // namespace
@@ -122,21 +138,28 @@ int main() {
         is >> cmd;
 
         if (cmd == "uci") {
+            std::lock_guard<std::mutex> lk(g_cout);
             std::cout << "id name ChessEngine 0.1\n";
             std::cout << "id author Joao\n";
-            std::cout << "uciok\n";
+            std::cout << "uciok\n" << std::flush;
         } else if (cmd == "isready") {
-            std::cout << "readyok\n";
+            std::lock_guard<std::mutex> lk(g_cout);
+            std::cout << "readyok\n" << std::flush;
         } else if (cmd == "ucinewgame") {
+            stop_and_join();
             pos.set_startpos();
         } else if (cmd == "position") {
+            stop_and_join();            // don't mutate the board under the worker
             cmd_position(pos, is);
         } else if (cmd == "go") {
             cmd_go(pos, is);
+        } else if (cmd == "stop") {
+            stop_and_join();            // aborts; the worker prints its bestmove
         } else if (cmd == "quit") {
             break;
         }
-        std::cout.flush();
     }
+
+    stop_and_join();
     return 0;
 }

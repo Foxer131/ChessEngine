@@ -29,4 +29,13 @@ struct SearchResult {
 // Search `pos` under `limits` and return the best move. `pos` is left unchanged.
 SearchResult search(Position& pos, const SearchLimits& limits);
 
+// Ask the running search to abort as soon as possible (thread-safe). The search
+// returns its best result so far. Used to implement UCI `stop` / start-over.
+void stop_search();
+
+// Clear the abort flag. MUST be called (on the controlling thread) before
+// starting a search that should run to completion - do NOT clear it from inside
+// the search thread, or a `stop` that arrives just after launch could be lost.
+void clear_stop();
+
 } // namespace chess

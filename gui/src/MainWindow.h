@@ -50,4 +50,7 @@ private:
     int  depth_ = 8;
     int  movetimeMs_ = 1000;
     bool gameActive_ = false;
+
+    bool engineThinking_ = false;   // a search request is outstanding
+    int  pendingDiscards_ = 0;      // stale bestmoves (from aborted searches) to ignore
 };

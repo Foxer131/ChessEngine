@@ -103,6 +103,14 @@ void MainWindow::newGame() {
     depth_       = dlg.depth();
     movetimeMs_  = dlg.movetimeMs();
 
+    // If a search from the previous game is still running, abort it and ignore
+    // the (now stale) bestmove it will emit, so it can't land on the new board.
+    if (engineThinking_) {
+        engine_->sendStop();
+        ++pendingDiscards_;
+        engineThinking_ = false;
+    }
+
     board_.reset();
     moves_.clear();
     gameActive_ = true;
@@ -154,11 +162,18 @@ void MainWindow::onMoveRequested(int fromFile, int fromRank, int toFile, int toR
 }
 
 void MainWindow::requestEngineMove() {
+    engineThinking_ = true;
     engine_->searchFromStart(moves_, useMovetime_ ? 0 : depth_,
                              useMovetime_ ? movetimeMs_ : 0);
 }
 
 void MainWindow::onBestMove(const QString& uci) {
+    if (pendingDiscards_ > 0) {       // bestmove from a search we abandoned: ignore
+        --pendingDiscards_;
+        return;
+    }
+    engineThinking_ = false;
+
     if (uci == QLatin1String("(none)") || uci == QLatin1String("0000")) {
         gameActive_ = false;
         boardView_->setInputEnabled(false);

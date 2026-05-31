@@ -25,8 +25,9 @@ if(CHESS_CORE_SOURCES)
 
     # ---- UCI executable ------------------------------------------------------
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/uci/main.cpp")
+        find_package(Threads REQUIRED)              # search runs on a worker thread
         add_executable(engine src/uci/main.cpp)
-        target_link_libraries(engine PRIVATE chess_core)
+        target_link_libraries(engine PRIVATE chess_core Threads::Threads)
     endif()
 
     # ---- Benchmarks / perft --------------------------------------------------

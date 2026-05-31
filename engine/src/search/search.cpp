@@ -4,11 +4,15 @@
 #include "chess/eval.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstring>
 
 namespace chess {
 namespace {
+
+// Set from another thread (the UCI loop) to abort the running search.
+std::atomic<bool> g_stop{false};
 
 constexpr int INF         = 32000;
 constexpr int MATE        = 31000;
@@ -67,6 +71,7 @@ struct Searcher {
 
     bool out_of_time() {
         if (stop) return true;
+        if (g_stop.load(std::memory_order_relaxed)) { stop = true; return true; }
         if (limits.max_nodes && nodes >= limits.max_nodes) { stop = true; return true; }
         if (limits.movetime_ms > 0 && (nodes & 2047) == 0) {
             auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -278,9 +283,14 @@ struct Searcher {
 } // namespace
 
 SearchResult search(Position& pos, const SearchLimits& limits) {
+    // NOTE: does NOT clear g_stop - the caller must clear_stop() beforehand on
+    // the controlling thread (see search.hpp), to avoid racing a `stop`.
     std::memset(g_tt, 0, sizeof(g_tt));
     Searcher s(pos, limits);
     return s.go();
 }
+
+void stop_search()  { g_stop.store(true,  std::memory_order_relaxed); }
+void clear_stop()   { g_stop.store(false, std::memory_order_relaxed); }
 
 } // namespace chess

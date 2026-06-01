@@ -139,43 +139,33 @@ void refresh(Accumulator& acc, const Position& pos) {
 // first L1 output weights, the opponent's the second half - so the result is
 // side-to-move-relative (same convention as the HCE evaluate()).
 namespace {
-// Sum over L1 of screlu(acc[i]) * w[i], accumulated in int64 (matches the scalar
-// reference exactly). screlu(x) = clamp(x,0,QA)^2, which can reach QA^2=65025, so
-// screlu*w needs >32 bits in the sum - we widen to int64.
+// Sum over L1 of screlu(acc[i]) * w[i]. The AVX2 path uses the Lizard SCReLU
+// trick: instead of (v*v)*w (which needs wide intermediates), reorder as
+// v * (v*w). With v=clamp(acc,0,QA) in [0,255] and output weights clipped so
+// |w| <= QA (=255*... actually <= 127 here), the product v*w fits in int16
+// (255*127 < 32767). Then _mm256_madd_epi16(v, v*w) computes the pairwise
+// products v*(v*w) = v^2*w = screlu*w AND sums adjacent pairs into int32 in one
+// instruction - no unpack/widen. Per-lane int32 sums stay small (16 terms each);
+// we widen to int64 only at the final horizontal reduction.
 inline std::int64_t dot_screlu(const std::int16_t* a, const std::int16_t* w) {
 #if NNUE_AVX2
     const __m256i zero = _mm256_setzero_si256();
     const __m256i qa   = _mm256_set1_epi16(std::int16_t(QA));
-    __m256i acc0 = _mm256_setzero_si256();   // four int64 lanes
-    __m256i acc1 = _mm256_setzero_si256();
+    __m256i sum = _mm256_setzero_si256();   // 8 int32 lanes
     for (int i = 0; i < L1; i += 16) {
-        __m256i x = _mm256_load_si256(reinterpret_cast<const __m256i*>(a + i));
-        x = _mm256_min_epi16(_mm256_max_epi16(x, zero), qa);     // clamp [0,QA]
+        __m256i v  = _mm256_load_si256(reinterpret_cast<const __m256i*>(a + i));
+        v = _mm256_min_epi16(_mm256_max_epi16(v, zero), qa);        // clamp [0,QA]
         __m256i wv = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(w + i));
-        // screlu*w = (x*x)*w. Compute x*w (int32 via madd of x with x*? ) carefully:
-        // do it as madd(x, x) gives x^2 summed in pairs - not what we want per-lane.
-        // Instead: p = x (int16) ; q = x*w (may exceed int16) -> use 32-bit mullo.
-        // Widen x and (x*w) to 32-bit and multiply, in two halves.
-        __m256i xw_lo = _mm256_mullo_epi16(x, wv);               // low 16 bits of x*w
-        __m256i xw_hi = _mm256_mulhi_epi16(x, wv);               // high 16 bits of x*w
-        __m256i xw0   = _mm256_unpacklo_epi16(xw_lo, xw_hi);     // x*w as int32 (lanes 0..7)
-        __m256i xw1   = _mm256_unpackhi_epi16(xw_lo, xw_hi);     // x*w as int32 (lanes 8..15)
-        __m256i x0    = _mm256_unpacklo_epi16(x, zero);          // x as int32 (>=0 so zero-extend ok)
-        __m256i x1    = _mm256_unpackhi_epi16(x, zero);
-        __m256i prod0 = _mm256_mullo_epi32(x0, xw0);             // x*(x*w) = screlu*w, int32
-        __m256i prod1 = _mm256_mullo_epi32(x1, xw1);
-        // widen int32 products to int64 and accumulate
-        acc0 = _mm256_add_epi64(acc0, _mm256_add_epi64(
-                   _mm256_cvtepi32_epi64(_mm256_castsi256_si128(prod0)),
-                   _mm256_cvtepi32_epi64(_mm256_extracti128_si256(prod0, 1))));
-        acc1 = _mm256_add_epi64(acc1, _mm256_add_epi64(
-                   _mm256_cvtepi32_epi64(_mm256_castsi256_si128(prod1)),
-                   _mm256_cvtepi32_epi64(_mm256_extracti128_si256(prod1, 1))));
+        __m256i vw = _mm256_mullo_epi16(v, wv);                     // v*w (fits int16)
+        sum = _mm256_add_epi32(sum, _mm256_madd_epi16(v, vw));      // += sum_pairs(v * vw)
     }
-    __m256i acc = _mm256_add_epi64(acc0, acc1);
-    std::int64_t lanes[4];
-    _mm256_storeu_si256(reinterpret_cast<__m256i*>(lanes), acc);
-    return lanes[0] + lanes[1] + lanes[2] + lanes[3];
+    // Horizontal reduce 8 int32 lanes -> int64 (widen to be safe against the
+    // theoretical full-saturation total).
+    std::int32_t lanes[8];
+    _mm256_storeu_si256(reinterpret_cast<__m256i*>(lanes), sum);
+    std::int64_t out = 0;
+    for (int k = 0; k < 8; ++k) out += lanes[k];
+    return out;
 #else
     std::int64_t out = 0;
     for (int i = 0; i < L1; ++i) out += std::int64_t(screlu(a[i])) * w[i];

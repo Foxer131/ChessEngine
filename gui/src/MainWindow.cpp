@@ -137,19 +137,17 @@ void MainWindow::newGame() {
     depth_       = dlg.depth();
     movetimeMs_  = dlg.movetimeMs();
 
+    // New game id: any bestmove still in flight from the previous game now belongs
+    // to an old id and will be ignored by onBestMove. Stop the old search too.
+    ++gameId_;
+    if (engineThinking_) engine_->sendStop();
+    engineThinking_ = false;
+
+    if (engine_->isRunning()) engine_->newGame();   // clears the engine's TT
+
     // NNUE is stronger in every mode now (SPRT: +237 Elo vs HCE at 8+0.08, +350 at
     // fixed nodes), so use it by default. The Evaluation menu can still pick HCE.
     setEval(/*useNnue=*/useNnue_);
-
-    // If a search from the previous game is still running, abort it and ignore
-    // the (now stale) bestmove it will emit, so it can't land on the new board.
-    if (engineThinking_) {
-        engine_->sendStop();
-        ++pendingDiscards_;
-        engineThinking_ = false;
-    }
-
-    if (engine_->isRunning()) engine_->newGame();   // clears the engine's TT
 
     board_.reset();
     moves_.clear();
@@ -206,6 +204,7 @@ void MainWindow::onMoveRequested(int fromFile, int fromRank, int toFile, int toR
 
 void MainWindow::requestEngineMove() {
     engineThinking_ = true;
+    searchGameId_   = gameId_;   // tag this search with the current game
     engine_->searchFromStart(moves_, useMovetime_ ? 0 : depth_,
                              useMovetime_ ? movetimeMs_ : 0);
 }
@@ -226,10 +225,10 @@ bool MainWindow::recordPositionAndCheckDraw() {
 }
 
 void MainWindow::onBestMove(const QString& uci) {
-    if (pendingDiscards_ > 0) {       // bestmove from a search we abandoned: ignore
-        --pendingDiscards_;
+    // Ignore a bestmove that belongs to a previous game (the id moved on) or that
+    // arrives when we aren't waiting for one (e.g. after the game already ended).
+    if (searchGameId_ != gameId_ || !engineThinking_)
         return;
-    }
     engineThinking_ = false;
 
     if (uci == QLatin1String("(none)") || uci == QLatin1String("0000")) {

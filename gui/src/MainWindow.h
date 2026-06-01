@@ -62,7 +62,12 @@ private:
 
     bool useNnue_ = true;           // chosen eval: true = NNUE (default, stronger), false = HCE
     bool engineThinking_ = false;   // a search request is outstanding
-    int  pendingDiscards_ = 0;      // stale bestmoves (from aborted searches) to ignore
+    // Each game gets a fresh id; a search request records the id it was made under.
+    // A bestmove is applied only if it belongs to the current game AND a search is
+    // still outstanding - so stale bestmoves (from an aborted/finished prior game)
+    // are dropped deterministically, with no fragile discard counter to desync.
+    int  gameId_ = 0;               // bumped on every New Game
+    int  searchGameId_ = -1;        // gameId_ in force when the current search was launched
 
     std::unordered_map<std::uint64_t, int> posCount_;  // occurrences per position (threefold)
 };

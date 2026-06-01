@@ -10,13 +10,17 @@ NET_URL=""                              # optional: gs://.../net.nnue to bootstr
 GAMES_PER_SHARD=4000                    # per core. 4000 x 32 cores @8000 nodes ~= 12M pos, ~35 min
 NODES=8000                              # higher than the first runs => cleaner labels
 # ---------------------------------------------------------------------------------
-set -euo pipefail
-exec > >(tee /var/log/datagen.log) 2>&1
+# NOTE: deliberately NOT using `set -e`/`pipefail` or `exec | tee`. A long parallel
+# job + a tee pipe can hand a worker SIGPIPE (exit 141), and with pipefail+`set -e`
+# that aborts the whole script mid-run (we lost a ~1h run that way). The startup
+# runner already captures stdout to the serial log, so we just write plainly and
+# guard the critical steps by hand.
+set -u
 echo "=== datagen start $(date) ==="
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get install -y git cmake ninja-build g++ >/dev/null
+apt-get install -y git cmake ninja-build g++ || { echo "apt failed"; }
 
 # Build only what's needed (no Qt): chess_core + gen_data.
 cd /root
@@ -26,6 +30,9 @@ cd engine
 cmake -G Ninja -S . -B /root/build -DCMAKE_BUILD_TYPE=Release \
       -DCHESS_BUILD_GUI=OFF -DCHESS_BUILD_TESTS=OFF -DCHESS_BUILD_BENCH=OFF >/dev/null
 cmake --build /root/build --target gen_data
+if [[ ! -x /root/build/bin/gen_data ]]; then
+  echo "BUILD FAILED: gen_data missing - aborting (VM left running for inspection)"; exit 1
+fi
 
 EVAL_ARG=""
 if [[ -n "$NET_URL" ]]; then
@@ -44,7 +51,10 @@ mkdir -p /root/data
 # also concatenate the local shards into a convenience all.txt at the end.
 gen_and_upload() {
   local i="$1"
-  /root/build/bin/gen_data "/root/data/shard${i}.txt" "$GAMES_PER_SHARD" "$NODES" "$i" $EVAL_ARG
+  # Send the worker's progress (stderr) to a per-shard file, NOT the shared serial
+  # pipe - that pipe is what caused SIGPIPE/exit-141 and killed a whole run.
+  /root/build/bin/gen_data "/root/data/shard${i}.txt" "$GAMES_PER_SHARD" "$NODES" "$i" $EVAL_ARG \
+      > "/root/data/shard${i}.log" 2>&1
   gcloud storage cp "/root/data/shard${i}.txt" "$BUCKET/${RUN_ID}/shard${i}.txt"
   echo "shard ${i} done + uploaded"
 }

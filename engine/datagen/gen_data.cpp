@@ -19,6 +19,7 @@
 #include "chess/movegen.hpp"
 #include "chess/movelist.hpp"
 #include "chess/search.hpp"
+#include "chess/nnue.hpp"
 
 #include <cstdint>
 #include <cstdlib>
@@ -106,13 +107,26 @@ double play_game(std::mt19937_64& rng, std::uint64_t nodes,
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::cerr << "usage: gen_data <out.txt> [games=1000] [nodes=5000] [seed=1]\n";
+        std::cerr << "usage: gen_data <out.txt> [games=1000] [nodes=5000] [seed=1] [evalfile]\n"
+                     "  evalfile: optional NNUE net to LABEL with (bootstrapping). Omit = HCE.\n";
         return 1;
     }
     const std::string out = argv[1];
     const int           games = (argc > 2) ? std::atoi(argv[2]) : 1000;
     const std::uint64_t nodes = (argc > 3) ? std::strtoull(argv[3], nullptr, 10) : 5000;
     const std::uint64_t seed  = (argc > 4) ? std::strtoull(argv[4], nullptr, 10) : 1;
+    const std::string   evalfile = (argc > 5) ? argv[5] : "";
+
+    // Bootstrapping: label with a previously-trained net instead of the HCE, so
+    // each generation's targets come from a stronger teacher than the last. The
+    // engine's evaluate() auto-uses NNUE once a net is loaded - generation code is
+    // unchanged; only the eval behind the search improves.
+    if (!evalfile.empty()) {
+        if (!nnue::load(evalfile)) { std::cerr << "failed to load net: " << evalfile << "\n"; return 1; }
+        std::cerr << "labeling with NNUE: " << evalfile << "\n";
+    } else {
+        std::cerr << "labeling with HCE (no net)\n";
+    }
 
     std::ofstream f(out);
     if (!f) { std::cerr << "cannot open " << out << "\n"; return 1; }

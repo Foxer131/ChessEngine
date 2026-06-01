@@ -102,7 +102,7 @@ gcloud compute instances create chess-datagen `
   --provisioning-model=SPOT `
   --instance-termination-action=DELETE `
   --image-family=debian-12 --image-project=debian-cloud `
-  --scopes=storage-read-write `
+  --scopes=storage-rw `
   --metadata-from-file=startup-script=tools/cloud/startup.sh
 ```
 
@@ -114,7 +114,7 @@ O que cada parte faz (resumido):
 - `c2d-standard-56` = 56 vCPU. `--provisioning-model=SPOT` = barato.
 - `--instance-termination-action=DELETE` = se o Google interromper, a VM some (não
   fica cobrando disco parado).
-- `--scopes=storage-read-write` = deixa a VM gravar no seu bucket.
+- `--scopes=storage-rw` = deixa a VM gravar no seu bucket.
 - `--metadata-from-file=startup-script=...` = manda o `startup.sh` para a VM rodar
   sozinha no boot.
 

@@ -60,7 +60,7 @@ private:
     int  movetimeMs_ = 1000;
     bool gameActive_ = false;
 
-    bool useNnue_ = false;          // chosen eval: false = HCE (default), true = NNUE
+    bool useNnue_ = true;           // chosen eval: true = NNUE (default, stronger), false = HCE
     bool engineThinking_ = false;   // a search request is outstanding
     int  pendingDiscards_ = 0;      // stale bestmoves (from aborted searches) to ignore
 

@@ -137,10 +137,9 @@ void MainWindow::newGame() {
     depth_       = dlg.depth();
     movetimeMs_  = dlg.movetimeMs();
 
-    // Pick the eval that is strongest for this mode (SPRT-measured): depth-limited
-    // play -> NNUE (+Elo at equal depth); timed play -> HCE (faster per node, wins
-    // on the clock for now). The Evaluation menu can still override after this.
-    setEval(/*useNnue=*/!useMovetime_);
+    // NNUE is stronger in every mode now (SPRT: +237 Elo vs HCE at 8+0.08, +350 at
+    // fixed nodes), so use it by default. The Evaluation menu can still pick HCE.
+    setEval(/*useNnue=*/useNnue_);
 
     // If a search from the previous game is still running, abort it and ignore
     // the (now stale) bestmove it will emit, so it can't land on the new board.

@@ -8,7 +8,9 @@ bootstrapping loop (label with the current net to escalate past HCE).
 ## Cost estimate (confirm current GCP prices; ~mid-2026, us-central1)
 - **c2d-standard-32** (32 vCPU AMD) spot ≈ **$0.30–0.45/h**. At ~289 pos/s/thread
   that's ~9k pos/s × 32 ≈ **~1M pos/min ⇒ ~50M positions in ~50 min ≈ $0.30–0.40**.
-- **c2d-standard-60** (60 vCPU) spot ≈ **$0.55–0.85/h** ⇒ 50M in ~25 min.
+- **c2d-standard-56** (56 vCPU) spot ≈ **$0.55–0.85/h** ⇒ 50M in ~25 min. (Note:
+  `c2d` has no `-60` variant; sizes are 2/4/8/16/32/56/112. For exactly 60 use
+  `c3d-standard-60`.)
 - **Storage** (GCS standard): 50M positions in text ≈ ~3 GB ≈ **$0.06/GB-month**;
   delete after downloading. Egress to download ~3 GB ≈ **~$0.30** (first GB free).
 - **Per 50M-position batch: well under $1.** A full bootstrap round (generate →

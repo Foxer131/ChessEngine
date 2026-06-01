@@ -21,12 +21,17 @@ Where the engine is *today* (so a new session can pick up TODOs without re-deriv
   then never reason about threads. Threads=1 must stay bit-identical.
 - **Evaluation — the engine has BOTH, uses ONE at a time (a runtime switch):**
   `evaluate()` in `engine/src/eval/eval.cpp` does `if (nnue::is_loaded()) NNUE else HCE`.
+  Pick via UCI `Eval` option (HCE / NNUE) or the GUI "Evaluation" menu.
+  - **NNUE** (`engine/src/eval/nnue.cpp`) — a trained net (768→256×2→1, SCReLU)
+    **embedded in the binary** (`tools/embed_net.py`); incremental AVX2 accumulator
+    on `Position`, bullet `.bin` format. **It BEATS the HCE: +108 Elo at fixed
+    nodes** (13.4M-position net). SIMD-optimized (Lizard SCReLU) so it's also
+    competitive at wall-clock. Full plan + history: **[docs/NNUE.md](docs/NNUE.md)**.
   - **HCE** (hand-crafted: material + PeSTO PSQT + safe mobility + bishop pair +
-    rook files + pawn structure) is the **default and currently the stronger**.
-  - **NNUE** (`engine/src/eval/nnue.cpp`) is fully wired (loads via UCI `EvalFile`,
-    incremental accumulator on `Position`, matches the `bullet` trainer's format).
-    Trained nets so far still lose to HCE (best: −99 Elo at 5M training positions),
-    so NNUE is **opt-in** until a net wins an SPRT. Full plan: **[docs/NNUE.md](docs/NNUE.md)**.
+    rook files + pawn structure) — the **current startup default** and a kept,
+    selectable option (the project's classical-eval study; do not delete).
+  - Default is still HCE pending a clean wall-clock SPRT win; flip to NNUE
+    (load embedded net at startup) once confirmed. See docs/NNUE.md.
   - Tried-and-reverted classical eval terms (king safety, passed pawns) were SPRT
     neutral/negative — don't re-add without tuning + SPRT. Search-heuristic tweaks
     (improving/continuation-history/history-LMR) also regressed and were reverted.

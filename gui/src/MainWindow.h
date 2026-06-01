@@ -18,6 +18,7 @@
 class BoardWidget;
 class UciEngine;
 class QPlainTextEdit;
+class QAction;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -27,6 +28,7 @@ public:
 private slots:
     void newGame();
     void chooseEngine();
+    void setEval(bool useNnue);   // switch engine eval: HCE (false) / NNUE (true)
     void onMoveRequested(int fromFile, int fromRank, int toFile, int toRank);
     void onBestMove(const QString& uci);
     void onInfoLine(const QString& line);
@@ -47,6 +49,8 @@ private:
     BoardWidget*   boardView_ = nullptr;
     UciEngine*     engine_ = nullptr;
     QPlainTextEdit* logView_ = nullptr;
+    QAction*    actHce_ = nullptr;       // Evaluation menu radio items (for syncing
+    QAction*    actNnue_ = nullptr;      // the checkmark when the mode auto-picks)
 
     QString     enginePath_;
     QStringList moves_;                 // game moves in UCI long algebraic
@@ -56,6 +60,7 @@ private:
     int  movetimeMs_ = 1000;
     bool gameActive_ = false;
 
+    bool useNnue_ = true;           // chosen eval: true = NNUE (default, stronger), false = HCE
     bool engineThinking_ = false;   // a search request is outstanding
     int  pendingDiscards_ = 0;      // stale bestmoves (from aborted searches) to ignore
 

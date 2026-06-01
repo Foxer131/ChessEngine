@@ -7,6 +7,7 @@
 #include <QApplication>
 #include <QMenuBar>
 #include <QMenu>
+#include <QActionGroup>
 #include <QStatusBar>
 #include <QFileDialog>
 #include <QInputDialog>
@@ -40,6 +41,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(engine_, &UciEngine::bestMove,    this, &MainWindow::onBestMove);
     connect(engine_, &UciEngine::infoLine,    this, &MainWindow::onInfoLine);
     connect(engine_, &UciEngine::engineError, this, &MainWindow::onEngineError);
+    // Re-apply the chosen eval whenever the engine (re)starts (it defaults to HCE,
+    // so only NNUE needs sending). `ready` fires on uciok/readyok.
+    connect(engine_, &UciEngine::ready, this, [this] {
+        if (useNnue_) engine_->setOption(QStringLiteral("Eval"), QStringLiteral("NNUE"));
+    });
 
     setupMenu();
     tryAutoLoadEngine();
@@ -53,6 +59,34 @@ void MainWindow::setupMenu() {
     gameMenu->addAction(tr("Set &Engine..."), this, &MainWindow::chooseEngine);
     gameMenu->addSeparator();
     gameMenu->addAction(tr("E&xit"), this, &QWidget::close);
+
+    // Evaluation selector: HCE (hand-crafted) vs NNUE (neural net). Mutually
+    // exclusive radio items - a manual override. New Game also auto-picks per mode
+    // (depth-limited -> NNUE, which is stronger at equal depth; timed -> HCE, which
+    // is stronger on the clock until NNUE inference is faster).
+    auto* evalMenu = menuBar()->addMenu(tr("E&valuation"));
+    auto* group = new QActionGroup(this);
+    group->setExclusive(true);
+    actHce_  = evalMenu->addAction(tr("&HCE (hand-crafted)"));
+    actNnue_ = evalMenu->addAction(tr("&NNUE (neural net)"));
+    actHce_->setCheckable(true);
+    actNnue_->setCheckable(true);
+    group->addAction(actHce_);
+    group->addAction(actNnue_);
+    actHce_->setChecked(!useNnue_);
+    actNnue_->setChecked(useNnue_);
+    connect(actHce_,  &QAction::triggered, this, [this] { setEval(false); });
+    connect(actNnue_, &QAction::triggered, this, [this] { setEval(true);  });
+}
+
+void MainWindow::setEval(bool useNnue) {
+    useNnue_ = useNnue;
+    if (actHce_)  actHce_->setChecked(!useNnue);   // keep the menu checkmark in sync
+    if (actNnue_) actNnue_->setChecked(useNnue);
+    engine_->setOption(QStringLiteral("Eval"), useNnue ? QStringLiteral("NNUE")
+                                                       : QStringLiteral("HCE"));
+    log(useNnue ? tr("Evaluation: NNUE (neural net).")
+                : tr("Evaluation: HCE (hand-crafted)."));
 }
 
 void MainWindow::tryAutoLoadEngine() {
@@ -102,6 +136,10 @@ void MainWindow::newGame() {
     useMovetime_ = dlg.useMovetime();
     depth_       = dlg.depth();
     movetimeMs_  = dlg.movetimeMs();
+
+    // NNUE is stronger in every mode now (SPRT: +237 Elo vs HCE at 8+0.08, +350 at
+    // fixed nodes), so use it by default. The Evaluation menu can still pick HCE.
+    setEval(/*useNnue=*/useNnue_);
 
     // If a search from the previous game is still running, abort it and ignore
     // the (now stale) bestmove it will emit, so it can't land on the new board.

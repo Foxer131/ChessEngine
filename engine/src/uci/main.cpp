@@ -158,6 +158,11 @@ int main() {
     pos.set_startpos();
     g_book.build_default();
 
+    // NNUE is the default eval now (SPRT: +237 Elo vs HCE at 8+0.08, +350 at fixed
+    // nodes). Load the embedded net at startup; the UCI `Eval`/`EvalFile` options
+    // can still switch to HCE or another net.
+    nnue::load_embedded();
+
     std::string line;
     while (std::getline(std::cin, line)) {
         std::istringstream is(line);
@@ -172,6 +177,7 @@ int main() {
             std::cout << "option name Threads type spin default 1 min 1 max 256\n";
             std::cout << "option name Hash type spin default 16 min 1 max 4096\n";
             std::cout << "option name EvalFile type string default <none>\n";
+            std::cout << "option name Eval type combo default NNUE var NNUE var HCE\n";
             std::cout << "uciok\n" << std::flush;
         } else if (cmd == "isready") {
             std::lock_guard<std::mutex> lk(g_cout);
@@ -190,6 +196,15 @@ int main() {
                 bool ok = nnue::load(value);
                 std::lock_guard<std::mutex> lk(g_cout);
                 std::cout << "info string EvalFile " << (ok ? "loaded: " : "FAILED: ") << value << "\n" << std::flush;
+            }
+            else if (name == "Eval") {
+                // Switch evaluation: HCE (hand-crafted, default) or NNUE (embedded net).
+                bool ok = true;
+                if (value == "NNUE")     ok = nnue::is_loaded() || nnue::load_embedded();
+                else /* HCE */           nnue::unload();
+                std::lock_guard<std::mutex> lk(g_cout);
+                std::cout << "info string Eval = " << value
+                          << (value == "NNUE" && !ok ? " (FAILED: no net)" : "") << "\n" << std::flush;
             }
         } else if (cmd == "ucinewgame") {
             stop_and_join();

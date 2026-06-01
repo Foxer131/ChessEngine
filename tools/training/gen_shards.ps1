@@ -10,7 +10,8 @@
 param(
     [int]$Shards = 12,
     [int]$Games  = 290,    # games per shard (~84k positions each at 5000 nodes)
-    [int]$Nodes  = 5000
+    [int]$Nodes  = 5000,
+    [string]$Net = ""      # optional NNUE net to label with (bootstrapping); "" = HCE
 )
 $ErrorActionPreference = "Stop"
 $env:Path = "C:\msys64\mingw64\bin;" + $env:Path
@@ -20,12 +21,13 @@ $data = "C:\chess_sprt\data"
 New-Item -ItemType Directory -Force $data | Out-Null
 if (-not (Test-Path $exe)) { throw "gen_data not built: $exe" }
 
-Write-Host "Launching $Shards shards x $Games games @ $Nodes nodes..." -ForegroundColor Cyan
+$label = if ($Net) { "NNUE($Net)" } else { "HCE" }
+Write-Host "Launching $Shards shards x $Games games @ $Nodes nodes, labeling with $label..." -ForegroundColor Cyan
 $procs = @()
 for ($i = 1; $i -le $Shards; $i++) {
     $out = Join-Path $data ("shard{0:D2}.txt" -f $i)
-    $procs += Start-Process -FilePath $exe -ArgumentList @($out, $Games, $Nodes, $i) `
-                            -NoNewWindow -PassThru
+    $args = if ($Net) { @($out, $Games, $Nodes, $i, $Net) } else { @($out, $Games, $Nodes, $i) }
+    $procs += Start-Process -FilePath $exe -ArgumentList $args -NoNewWindow -PassThru
 }
 Write-Host "Waiting for $($procs.Count) shards to finish..." -ForegroundColor Cyan
 $procs | Wait-Process

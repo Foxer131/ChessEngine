@@ -5,16 +5,58 @@ This is the plan for replacing the hand-crafted evaluation (HCE) with an **NNUE*
 available to a classical alpha-beta engine: plausibly **+300–600 Elo** over our
 HCE. Read `CLAUDE.md` first (build path gotcha, "user codes along", SPRT harness).
 
-> Status: **Phases 0-2 done; two nets trained** (branch `experiment/nnue`).
-> Inference, incremental accumulator, bullet pipeline all work. Data scale is the
-> lever (fixed-nodes SPRT vs HCE, 20k nodes):
->   - 355k positions  -> 1.5% (-720 Elo)  : total collapse
->   - 5.04M positions -> 36%  (-99 Elo)   : plays real chess, still ~99 Elo < HCE
-> So +14x data bought ~+620 Elo. The net now loses by gradual POSITIONAL drift
-> (piece coordination/activity), not blunders - it just isn't quite as strong as
-> the tuned HCE yet. Next levers (in order): (a) more + better data (10-50M, and
-> higher search nodes per label than 5000 for cleaner targets); (b) bigger net /
-> HalfKA king-buckets; (c) train longer. The mechanics are not suspect.
+> Status: **NNUE BEATS HCE — milestone reached** (branch `experiment/nnue`).
+> Data scale was the whole story (fixed-nodes SPRT vs HCE, 20k nodes):
+>   - 355k positions          -> 1.5%  (-720 Elo)  : total collapse
+>   - 5.04M positions @5000n   -> 36%   (-99 Elo)   : plays real chess, just below HCE
+>   - **13.4M positions @8000n -> 65%  (+108 Elo)** : **beats the HCE (LOS 100%)**
+> The jump from -99 to +108 (2.7x data + deeper 8000-node labels) crossed the
+> threshold. NNUE is now the stronger eval and should be the DEFAULT (load the net
+> at startup; HCE becomes the fallback when no net is present). Net file:
+> `C:\chess_sprt\data\net13m.nnue` (our NN01 format, 768->256x2->1).
+>
+> Next levers now that NNUE > HCE: (a) **bootstrapping is finally valid** - label
+> the next data with net13m (search guided by it now beats HCE-guided search);
+> (b) more data still helps (30-50M); (c) bigger net / HalfKA king-buckets for the
+> next big step; (d) SIMD the forward pass (it's ~3x slower than HCE) to convert
+> the eval win into more nodes/sec too.
+
+### Speed: eval-quality win vs eval-cost (the wall-clock story)
+The +108 is at FIXED NODES (isolates eval quality). NNUE costs more per eval, so at
+a real time control it searches shallower; net Elo = quality gain - speed loss.
+- scalar NNUE: ~471k nps (HCE ~800k) -> at 8+0.08s NNUE was **-134 Elo** vs HCE.
+- **SIMD it.** The net is embedded (tools/embed_net.py) + selectable via UCI `Eval`
+  (HCE default / NNUE) and the GUI Evaluation menu. AVX2 work in `nnue.cpp`:
+  - accumulator add/remove: `_mm256_add/sub_epi16`, 16 int16/instr; Accumulator is
+    `alignas(32)`.
+  - forward: **Lizard SCReLU trick** - reorder `(v*v)*w` to `v*(v*w)`, compute
+    `v*w` in int16 (255*127 < 32767), then `_mm256_madd_epi16(v, v*w)` sums pairs to
+    int32 in one instruction (no unpack/widen).
+  - bit-exact vs scalar (same eval, same node counts); `accumulator_matches_refresh`
+    gate still passes.
+  - NPS: 471k -> 536k (pass 1) -> 583k (Lizard).
+- **Wall-clock verdict (clean run, idle machine, concurrency 4, 8+0.08, 200 games):
+  NNUE -33 Elo vs HCE** (LOS ~5%). So SIMD cut the real-time gap from -134 to -33,
+  but NNUE is still ~30% slower per eval and the lost depth outweighs the +108
+  quality at this hardware/TC. (The earlier -4 / -75 readings were CPU-contention
+  noise; -33 is the trustworthy figure.)
+- **DECISION: HCE stays the default** - it's the stronger engine on the clock today.
+  NNUE remains selectable (UCI `Eval` / GUI) and is the better *evaluation* (+108 at
+  fixed nodes); it just isn't fast enough yet to win real games.
+- To make NNUE the default later, close the speed gap further: int8 output layer +
+  `_mm256_maddubs_epi16` (like Stockfish), or a smaller/faster L1, or only-eval-when-
+  needed in search. Re-run the clean wall-clock SPRT; flip the default if NNUE wins.
+
+### Bootstrapping is PREMATURE until NNUE > HCE (tested, -79 Elo)
+We tried the AlphaZero-style loop early: generated 3M positions LABELED BY net5m
+(via `gen_data <...> <net>`), trained v2, SPRT v2 vs v1(net5m) at 20k nodes =>
+**v2 was -79.5 Elo WORSE** (400 games, H0). Why: bootstrapping only helps when the
+teacher (search guided by the current net) produces *better* labels than what you
+had. But net5m is still weaker than the HCE, so labeling with it is learning from
+a worse teacher than the HCE we already use - it amplifies the net's weaknesses.
+**Rule: keep labeling with the HCE (the best evaluator we have) until a net beats
+the HCE in SPRT. Only then does net-labeled bootstrapping start to pay off.** The
+`-Net`/`[evalfile]` machinery is correct and ready; just don't use it yet.
 
 ## Hard-won lessons (read before touching NNUE again)
 

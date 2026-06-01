@@ -3,7 +3,7 @@
 # across all cores, upload to GCS as it goes, then self-delete. See gcp_datagen.md.
 #
 # EDIT these two:
-BUCKET="gs://CHANGE-ME-chess-nnue"     # your GCS bucket
+BUCKET="gs://CHANGE-ME-chess-nnue"     # your GCS bucket (e.g. gs://joao-chess-nnue)
 NET_URL=""                              # optional: gs://.../net.nnue to bootstrap-label with
 #
 # Tunables:
@@ -20,10 +20,11 @@ apt-get install -y git cmake ninja-build g++ >/dev/null
 
 # Build only what's needed (no Qt): chess_core + gen_data.
 cd /root
-git clone --depth 1 https://github.com/Foxer131/<REPO>.git engine || {
-  echo "EDIT: set your repo URL"; }
+git clone --depth 1 https://github.com/Foxer131/ChessEngine.git engine
 cd engine
-cmake -G Ninja -S . -B /root/build -DCMAKE_BUILD_TYPE=Release >/dev/null
+# No Qt on the VM: disable the GUI (and tests) so configure doesn't look for Qt.
+cmake -G Ninja -S . -B /root/build -DCMAKE_BUILD_TYPE=Release \
+      -DCHESS_BUILD_GUI=OFF -DCHESS_BUILD_TESTS=OFF -DCHESS_BUILD_BENCH=OFF >/dev/null
 cmake --build /root/build --target gen_data
 
 EVAL_ARG=""

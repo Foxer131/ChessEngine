@@ -7,6 +7,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -198,6 +199,7 @@ struct Worker {
     std::chrono::steady_clock::time_point start;
 
     Move rootBest = MOVE_NONE;
+    int  rootDepth = 1;          // depth of the current iterative-deepening iteration
 
     Move killers[MAX_PLY][2] = {};
     int  history[COLOR_NB][SQUARE_NB][SQUARE_NB] = {};
@@ -326,7 +328,11 @@ struct Worker {
 
         const bool root    = (ply == 0);
         const bool inCheck = pos.in_check();
-        if (inCheck) ++depth;                       // check extension
+        // Check extension, but cap how far a line may run past the nominal depth.
+        // Unbounded check extensions let forcing check sequences (common in winning
+        // positions) blow up the tree - the likely cause of a normally-20s move
+        // taking minutes. Stop extending once we're already deep past the root.
+        if (inCheck && ply < 2 * rootDepth) ++depth;
 
         if (depth <= 0) return quiesce(alpha, beta, ply);
 
@@ -473,18 +479,32 @@ struct Worker {
         int prevScore = 0;
 
         for (int d = 1; d <= shared.limits.depth && d < MAX_PLY; ++d) {
-            rootBest = MOVE_NONE;
+            rootBest  = MOVE_NONE;
+            rootDepth = d;
 
             int alpha = -INF, beta = INF, window = 25;
             if (d >= 4) { alpha = prevScore - window; beta = prevScore + window; }
 
             int score;
+            int fails = 0;
             while (true) {                            // aspiration window with widening
                 score = negamax(d, alpha, beta, 0, MOVE_NONE);
                 if (stop) break;
-                if (score <= alpha)      { window *= 2; alpha = std::max(-INF, score - window); }
-                else if (score >= beta)  { window *= 2; beta  = std::min( INF, score + window); }
-                else break;
+                // Widen only the bound that failed (the other stays tight). After a
+                // couple of failures, or once near mate, open that side fully -
+                // doubling forever on an unstable score re-searches the whole tree
+                // many times (the cause of pathological slowdowns).
+                if (score <= alpha) {
+                    window *= 2;
+                    alpha = (++fails >= 2 || std::abs(score) >= MATE_IN_MAX)
+                                ? -INF : std::max(-INF, score - window);
+                } else if (score >= beta) {
+                    window *= 2;
+                    beta = (++fails >= 2 || std::abs(score) >= MATE_IN_MAX)
+                                ? INF : std::min(INF, score + window);
+                } else {
+                    break;
+                }
             }
 
             if (stop) break;                          // discard an incomplete depth

@@ -35,15 +35,17 @@ a real time control it searches shallower; net Elo = quality gain - speed loss.
   - bit-exact vs scalar (same eval, same node counts); `accumulator_matches_refresh`
     gate still passes.
   - NPS: 471k -> 536k (pass 1) -> 583k (Lizard).
-- **Wall-clock SPRT is INCONCLUSIVE so far** and needs an idle machine. Runs gave
-  -134 (scalar), -4 (pass 1, 80g), -75 (Lizard, 80g) - but those were measured with
-  Opera/Discord/VSCode/OneDrive competing for CPU, which biases real-time games
-  badly (engines starve unevenly). **To get a trustworthy number: close heavy apps,
-  use lower concurrency (≤4), then SPRT.** Fixed-nodes (+108) is unaffected and is
-  the real proof the eval is better; the open question is only whether NNUE's eval
-  cost is small enough to also win on the clock at this hardware.
-- Default stays HCE until a CLEAN wall-clock SPRT shows NNUE clearly ahead; then
-  flip the engine default to load the embedded net at startup.
+- **Wall-clock verdict (clean run, idle machine, concurrency 4, 8+0.08, 200 games):
+  NNUE -33 Elo vs HCE** (LOS ~5%). So SIMD cut the real-time gap from -134 to -33,
+  but NNUE is still ~30% slower per eval and the lost depth outweighs the +108
+  quality at this hardware/TC. (The earlier -4 / -75 readings were CPU-contention
+  noise; -33 is the trustworthy figure.)
+- **DECISION: HCE stays the default** - it's the stronger engine on the clock today.
+  NNUE remains selectable (UCI `Eval` / GUI) and is the better *evaluation* (+108 at
+  fixed nodes); it just isn't fast enough yet to win real games.
+- To make NNUE the default later, close the speed gap further: int8 output layer +
+  `_mm256_maddubs_epi16` (like Stockfish), or a smaller/faster L1, or only-eval-when-
+  needed in search. Re-run the clean wall-clock SPRT; flip the default if NNUE wins.
 
 ### Bootstrapping is PREMATURE until NNUE > HCE (tested, -79 Elo)
 We tried the AlphaZero-style loop early: generated 3M positions LABELED BY net5m

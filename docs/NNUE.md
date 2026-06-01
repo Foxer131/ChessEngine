@@ -5,10 +5,16 @@ This is the plan for replacing the hand-crafted evaluation (HCE) with an **NNUE*
 available to a classical alpha-beta engine: plausibly **+300–600 Elo** over our
 HCE. Read `CLAUDE.md` first (build path gotcha, "user codes along", SPRT harness).
 
-> Status: **Phases 0-2 done + first net trained** (branch `experiment/nnue`).
-> Inference, incremental accumulator, bullet training pipeline all work. The first
-> net (355k positions) LOST to the HCE; diagnosis below. Pick up at "re-train with
-> more data".
+> Status: **Phases 0-2 done; two nets trained** (branch `experiment/nnue`).
+> Inference, incremental accumulator, bullet pipeline all work. Data scale is the
+> lever (fixed-nodes SPRT vs HCE, 20k nodes):
+>   - 355k positions  -> 1.5% (-720 Elo)  : total collapse
+>   - 5.04M positions -> 36%  (-99 Elo)   : plays real chess, still ~99 Elo < HCE
+> So +14x data bought ~+620 Elo. The net now loses by gradual POSITIONAL drift
+> (piece coordination/activity), not blunders - it just isn't quite as strong as
+> the tuned HCE yet. Next levers (in order): (a) more + better data (10-50M, and
+> higher search nodes per label than 5000 for cleaner targets); (b) bigger net /
+> HalfKA king-buckets; (c) train longer. The mechanics are not suspect.
 
 ## Hard-won lessons (read before touching NNUE again)
 

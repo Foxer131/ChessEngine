@@ -24,11 +24,19 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <random>
 #include <vector>
 
 namespace chess {
 namespace nnue {
+
+// The network compiled into the binary (tools/embed_net.py -> embedded_net.cpp).
+// Weak fallbacks here so the engine still links if no net is embedded yet; the
+// real definitions in embedded_net.cpp override them.
+extern const unsigned char EMBEDDED_NET[];
+extern const std::size_t   EMBEDDED_NET_SIZE;
+
 namespace {
 
 // Quantization / scaling - MUST match the trainer (bullet simple.rs defaults).
@@ -52,11 +60,22 @@ inline std::int32_t screlu(std::int16_t x) {
     return y * y;
 }
 
-template <typename T>
-bool read_vec(std::ifstream& f, std::vector<T>& v, std::size_t n) {
-    v.resize(n);
-    f.read(reinterpret_cast<char*>(v.data()), std::streamsize(n * sizeof(T)));
-    return bool(f);
+// Parse bullet's raw .bin layout (four i16 arrays, no header) from a byte buffer.
+// Both file and embedded loaders funnel through here. `size` must hold at least
+// the four arrays; trailing padding (bullet aligns to 64 bytes) is ignored.
+bool parse_net(const unsigned char* p, std::size_t size, Network& n) {
+    const std::size_t need = (std::size_t(INPUT_DIM) * L1 + L1 + 2 * L1 + 1) * sizeof(std::int16_t);
+    if (size < need) return false;
+    auto take = [&](std::vector<std::int16_t>& v, std::size_t count) {
+        v.resize(count);
+        std::memcpy(v.data(), p, count * sizeof(std::int16_t));
+        p += count * sizeof(std::int16_t);
+    };
+    take(n.ftW,  std::size_t(INPUT_DIM) * L1);
+    take(n.ftB,  L1);
+    take(n.outW, std::size_t(2) * L1);
+    std::memcpy(&n.outB, p, sizeof(std::int16_t));
+    return true;
 }
 
 } // namespace
@@ -65,23 +84,24 @@ bool is_loaded() { return g_loaded; }
 
 void unload() { g_loaded = false; }
 
-// Load bullet's raw .bin (sized exactly to the four arrays; no header). We infer
-// nothing - the layout is fixed by our build's L1.
 bool load(const std::string& path) {
     g_loaded = false;
     std::ifstream f(path, std::ios::binary);
     if (!f) return false;
-
+    std::vector<unsigned char> buf((std::istreambuf_iterator<char>(f)),
+                                    std::istreambuf_iterator<char>());
     Network n;
-    if (!read_vec(f, n.ftW,  std::size_t(INPUT_DIM) * L1)) return false;
-    if (!read_vec(f, n.ftB,  L1))                          return false;
-    if (!read_vec(f, n.outW, std::size_t(2) * L1))         return false;
-    f.read(reinterpret_cast<char*>(&n.outB), sizeof(std::int16_t));
-    if (!f) return false;
-    // Trailing bytes are allowed: bullet pads the quantised .bin to a 64-byte
-    // boundary (the scalar output bias rounds up from 2 to 64 bytes). We've read
-    // exactly the four arrays we need; ignore any padding after them.
+    if (!parse_net(buf.data(), buf.size(), n)) return false;
+    g_net = std::move(n);
+    g_loaded = true;
+    return true;
+}
 
+bool load_embedded() {
+    g_loaded = false;
+    if (EMBEDDED_NET_SIZE == 0) return false;
+    Network n;
+    if (!parse_net(EMBEDDED_NET, EMBEDDED_NET_SIZE, n)) return false;
     g_net = std::move(n);
     g_loaded = true;
     return true;

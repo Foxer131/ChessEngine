@@ -60,6 +60,10 @@ bool load(const std::string& path);
 bool is_loaded();
 void unload();   // drop the loaded net (evaluate() falls back to HCE)
 
+// Load the network compiled into the binary (tools/embed_net.py -> embedded_net.cpp).
+// Lets the engine use NNUE with no external file. Returns false if no net is embedded.
+bool load_embedded();
+
 // Recompute the accumulator from scratch for `pos` (the from-scratch reference,
 // and the Phase-2 correctness gate: incremental updates must always equal this).
 void refresh(Accumulator& acc, const Position& pos);

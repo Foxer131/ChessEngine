@@ -33,6 +33,11 @@ public:
     std::uint64_t key() const;       // Zobrist key (for repetition detection)
     int halfmoveClock() const;       // plies since last pawn move/capture (50-move rule)
 
+    // Game-end detection (so the GUI recognizes mate/stalemate itself, without
+    // asking the engine to "think" on a terminal position).
+    bool hasLegalMoves() const;      // false => checkmate or stalemate
+    bool inCheck() const;            // side-to-move's king is attacked
+
     // Does (file,rank) hold a piece of the side to move?
     bool isOwnPiece(int file, int rank) const;
 

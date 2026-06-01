@@ -80,6 +80,16 @@ bool GuiBoard::applyUci(const QString& uci) {
     return false;   // illegal or malformed -> reject
 }
 
+bool GuiBoard::hasLegalMoves() const {
+    chess::MoveList legal;
+    chess::generate_legal(const_cast<chess::Position&>(pos_), legal);
+    return legal.size() != 0;
+}
+
+bool GuiBoard::inCheck() const {
+    return pos_.in_check();
+}
+
 QString GuiBoard::toUci(int fromFile, int fromRank, int toFile, int toRank, QChar promo) {
     auto s = [](int f, int r) {
         return QString(QChar('a' + f)) + QChar('1' + r);

@@ -210,6 +210,19 @@ void MainWindow::requestEngineMove() {
 }
 
 bool MainWindow::recordPositionAndCheckDraw() {
+    // Checkmate / stalemate first: if the side to move has no legal reply, the game
+    // is over right now - recognize it ourselves instead of asking the engine to
+    // "think" on a terminal position (which returns 0000 and looked like a freeze).
+    if (!board_.hasLegalMoves()) {
+        QString reason = board_.inCheck() ? tr("Checkmate.") : tr("Stalemate - draw.");
+        gameActive_ = false;
+        boardView_->setInputEnabled(false);
+        log(reason);
+        QMessageBox::information(this, tr("Game over"), reason);
+        updateStatus();
+        return true;
+    }
+
     int count = ++posCount_[board_.key()];
     QString reason;
     if (count >= 3)                          reason = tr("Draw by threefold repetition.");

@@ -68,7 +68,13 @@ echo "generated $LINES positions; uploading merged all.txt..."
 gcloud storage cp /root/data/all.txt "$BUCKET/all_${RUN_ID}.txt"
 gcloud storage cp /root/data/all.txt "$BUCKET/all.txt"   # convenience 'latest'
 
-echo "=== done $(date); self-deleting ==="
+echo "=== done $(date); shutting down ==="
+# Try to self-delete via the API (needs the compute scope; our VM only has
+# storage-rw, so this usually fails - that's fine). EITHER WAY, halt the machine:
+# `shutdown -h` always works and a STOPPED instance costs ~nothing (only its small
+# disk). To self-DELETE without manual cleanup, launch with
+# `--scopes=storage-rw,compute-rw` (then the delete below succeeds). Otherwise
+# just `gcloud compute instances delete chess-datagen --zone=... --quiet` by hand.
 NAME=$(curl -s -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/name)
 ZONE=$(curl -s -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/zone | awk -F/ '{print $NF}')
-gcloud compute instances delete "$NAME" --zone="$ZONE" --quiet
+gcloud compute instances delete "$NAME" --zone="$ZONE" --quiet || shutdown -h now

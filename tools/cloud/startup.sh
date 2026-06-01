@@ -3,11 +3,11 @@
 # across all cores, upload to GCS as it goes, then self-delete. See gcp_datagen.md.
 #
 # EDIT these two:
-BUCKET="gs://CHANGE-ME-chess-nnue"     # your GCS bucket (e.g. gs://joao-chess-nnue)
+BUCKET="gs://whoisthisfrom-chess-nnue"     # your GCS bucket (e.g. gs://joao-chess-nnue)
 NET_URL=""                              # optional: gs://.../net.nnue to bootstrap-label with
 #
 # Tunables:
-GAMES_PER_SHARD=15000                   # ~1.4M positions/shard at 5000 nodes
+GAMES_PER_SHARD=4000                    # per core. 4000 x 32 cores @8000 nodes ~= 12M pos, ~35 min
 NODES=8000                              # higher than the first runs => cleaner labels
 # ---------------------------------------------------------------------------------
 set -euo pipefail
@@ -35,19 +35,27 @@ if [[ -n "$NET_URL" ]]; then
 fi
 
 NCORES=$(nproc)
-echo "generating on $NCORES cores, $GAMES_PER_SHARD games/shard @ $NODES nodes"
+RUN_ID="$(date +%Y%m%d_%H%M%S)"
+echo "generating on $NCORES cores, $GAMES_PER_SHARD games/shard @ $NODES nodes (run $RUN_ID)"
 mkdir -p /root/data
+
+# Each shard uploads its OWN file to the bucket as soon as it finishes, so a spot
+# preemption only loses the shards still in flight (not the whole run). We then
+# also concatenate the local shards into a convenience all.txt at the end.
+gen_and_upload() {
+  local i="$1"
+  /root/build/bin/gen_data "/root/data/shard${i}.txt" "$GAMES_PER_SHARD" "$NODES" "$i" $EVAL_ARG
+  gcloud storage cp "/root/data/shard${i}.txt" "$BUCKET/${RUN_ID}/shard${i}.txt"
+  echo "shard ${i} done + uploaded"
+}
 pids=()
-for i in $(seq 1 "$NCORES"); do
-  /root/build/bin/gen_data "/root/data/shard${i}.txt" "$GAMES_PER_SHARD" "$NODES" "$i" $EVAL_ARG &
-  pids+=($!)
-done
+for i in $(seq 1 "$NCORES"); do gen_and_upload "$i" & pids+=($!); done
 wait "${pids[@]}"
 
 cat /root/data/shard*.txt > /root/data/all.txt
 LINES=$(wc -l < /root/data/all.txt)
-echo "generated $LINES positions; uploading..."
-gcloud storage cp /root/data/all.txt "$BUCKET/all_$(date +%Y%m%d_%H%M%S).txt"
+echo "generated $LINES positions; uploading merged all.txt..."
+gcloud storage cp /root/data/all.txt "$BUCKET/all_${RUN_ID}.txt"
 gcloud storage cp /root/data/all.txt "$BUCKET/all.txt"   # convenience 'latest'
 
 echo "=== done $(date); self-deleting ==="

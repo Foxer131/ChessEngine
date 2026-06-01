@@ -135,8 +135,16 @@ está acontecendo (log da "porta serial"):
 ```powershell
 gcloud compute instances get-serial-port-output chess-datagen --zone=us-central1-a
 ```
-Rode de novo a cada poucos minutos. Você verá "generating on 60 cores…", depois
-"generated N positions; uploading…", e por fim "self-deleting".
+Rode de novo a cada poucos minutos. Você verá "generating on 32 cores…", depois
+cada shard sobe sozinho ("shard N done + uploaded"), e por fim "self-deleting".
+
+> **Resiliência a preempção:** cada shard sobe pro bucket assim que termina, em
+> `gs://SEU-BUCKET/<RUN_ID>/shardN.txt`. Se a VM spot for interrompida no meio,
+> você ainda fica com os shards já prontos — baixe-os e concatene:
+> ```powershell
+> gcloud storage cp "gs://joao-chess-nnue/<RUN_ID>/*" C:\chess_sprt\data\
+> Get-Content C:\chess_sprt\data\shard*.txt | Set-Content C:\chess_sprt\data\all.txt
+> ```
 
 Para checar se a VM já se deletou (= terminou):
 ```powershell

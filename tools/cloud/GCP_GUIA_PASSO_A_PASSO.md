@@ -102,9 +102,15 @@ gcloud compute instances create chess-datagen `
   --provisioning-model=SPOT `
   --instance-termination-action=DELETE `
   --image-family=debian-12 --image-project=debian-cloud `
-  --scopes=storage-rw `
+  --scopes=storage-rw,compute-rw `
   --metadata-from-file=startup-script=tools/cloud/startup.sh
 ```
+
+> **Por que `compute-rw` no scope:** sem ele a VM não tem permissão para se
+> auto-DELETAR no fim (só sobe os dados e fica ligada, gastando à toa). Com
+> `storage-rw,compute-rw` o auto-delete funciona. Mesmo assim, **sempre confira**
+> com `gcloud compute instances list` ao terminar e delete manualmente se preciso:
+> `gcloud compute instances delete chess-datagen --zone=us-central1-a --quiet`.
 
 > Nota: a família `c2d` vem em 2/4/8/16/32/**56**/112 vCPU — **não existe `c2d-standard-60`**.
 > Use `c2d-standard-56`. (Se quiser exatamente 60, a família mais nova `c3d` tem:

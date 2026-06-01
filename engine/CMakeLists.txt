@@ -36,6 +36,13 @@ if(CHESS_CORE_SOURCES)
         add_executable(bench bench/bench_main.cpp)
         target_link_libraries(bench PRIVATE chess_core)
     endif()
+
+    # ---- NNUE training-data generator (self-play) ----------------------------
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/datagen/gen_data.cpp")
+        find_package(Threads REQUIRED)
+        add_executable(gen_data datagen/gen_data.cpp)
+        target_link_libraries(gen_data PRIVATE chess_core Threads::Threads)
+    endif()
 else()
     message(STATUS "chess_core: no sources yet - engine targets skipped. "
                    "Add .cpp files under engine/src/ and reconfigure.")

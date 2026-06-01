@@ -386,4 +386,39 @@ std::string Position::to_string() const {
     return os.str();
 }
 
+std::string Position::to_fen() const {
+    static const char glyphs[] = " PNBRQK  pnbrqk";
+    std::ostringstream os;
+
+    // Field 1: placement, rank 8 -> 1, file a -> h, runs of empties as digits.
+    for (Rank r = RANK_8; r >= RANK_1; r = Rank(r - 1)) {
+        int empty = 0;
+        for (File f = FILE_A; f <= FILE_H; f = File(f + 1)) {
+            Piece pc = piece_on(make_square(f, r));
+            if (pc == NO_PIECE) { ++empty; continue; }
+            if (empty) { os << empty; empty = 0; }
+            os << glyphs[pc];
+        }
+        if (empty) os << empty;
+        if (r != RANK_1) os << '/';
+    }
+
+    os << (sideToMove_ == WHITE ? " w " : " b ");
+
+    // Field 3: castling.
+    std::string c;
+    if (castlingRights_ & WHITE_OO)  c += 'K';
+    if (castlingRights_ & WHITE_OOO) c += 'Q';
+    if (castlingRights_ & BLACK_OO)  c += 'k';
+    if (castlingRights_ & BLACK_OOO) c += 'q';
+    os << (c.empty() ? "-" : c) << ' ';
+
+    // Field 4: en-passant target.
+    if (epSquare_ == SQ_NONE) os << '-';
+    else os << char('a' + file_of(epSquare_)) << char('1' + rank_of(epSquare_));
+
+    os << ' ' << halfmoveClock_ << ' ' << fullmoveNumber_;
+    return os.str();
+}
+
 } // namespace chess

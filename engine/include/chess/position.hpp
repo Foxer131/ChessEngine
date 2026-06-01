@@ -101,8 +101,9 @@ public:
     void put_piece(Piece pc, Square s);   // place pc on s (s must be empty)
     void remove_piece(Square s);          // remove whatever is on s
 
-    // ---- debug (provided in position.cpp) ----
+    // ---- debug / serialization (provided in position.cpp) ----
     std::string to_string() const;        // ASCII board, rank 8 on top
+    std::string to_fen() const;           // the position as a 6-field FEN string
 
 private:
     Bitboard byColor_[COLOR_NB]      = {}; // index by Color

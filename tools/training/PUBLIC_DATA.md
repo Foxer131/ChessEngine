@@ -7,18 +7,29 @@ to push the net further. Licence is clean: Stockfish's training data comes from
 CC0. We train our OWN net from it, so nothing is encumbered.
 
 ## Get a dataset (binpack, loaded natively by bullet)
-From the nnue-pytorch wiki "Training datasets"
-(<https://github.com/official-stockfish/nnue-pytorch/wiki/Training-datasets>) or
-Kaggle (<https://www.kaggle.com/datasets/linrock>). Examples:
-- `nodes5000pv2_UHO.binpack` — moderate size, depth-ish 5000 nodes (good first pick).
-- `data_d9_2021_09_02.binpack` — ~16B positions, depth 9 (huge; only if you have the
-  disk + time).
+Direct download links (from the nnue-pytorch wiki "Training datasets"; all are
+Stockfish/Leela binpacks, Leela data is ODbL). **Smallest/first-pick at the top.**
 
-Download one and put it at:
+| Dataset | Labels | Google Drive link |
+|---|---|---|
+| `nodes5000pv2_UHO.binpack` (recommended first) | 5000 nodes, UHO openings | https://drive.google.com/file/d/1UQdZN_LWQ265spwTBwDKo0t1WjSJKvWY/view |
+| `dfrc_n5000.binpack` | 5000 nodes (DFRC) | https://drive.google.com/file/d/17vDaff9LAsVo_1OfsgWAIYqJtqR8aHlm/view |
+| `training_data.binpack` | mixed | https://drive.google.com/file/d/1RFkQES3DpsiJqsOtUshENtzPfFgUmEff/view |
+| `large_gensfen_multipvdiff_100_d9.binpack` | depth 9 | https://drive.google.com/file/d/1VlhnHL8f-20AXhGkILujnNXHwy9T-MQw/view |
+| `T60T70wIsRightFarseer.binpack` | mixed Leela | https://drive.google.com/file/d/1_sQoWBl31WAxNXma2v45004CIVltytP8/view |
+| `data_d9_2021_09_02.binpack` (~16B positions, huge) | depth 9 | https://drive.google.com/file/d/1lFC_tej8WyXojhh7-AmXV_kkrTauEsqt/view |
+
+Easiest: open the link in a browser and download, then move/rename it to
+`C:\chess_nnue\bullet\data\public.binpack`.
+
+CLI alternative (big files need gdown to handle Drive's virus-scan confirmation):
+```powershell
+pip install gdown
+# the long token in the link is the FILE_ID (e.g. 1UQdZN_LWQ265spwTBwDKo0t1WjSJKvWY)
+gdown 1UQdZN_LWQ265spwTBwDKo0t1WjSJKvWY -O C:\chess_nnue\bullet\data\public.binpack
 ```
-C:\chess_nnue\bullet\data\public.binpack
-```
-(Large files come from Google Drive links on the wiki - download in a browser.)
+(Some links are tens of GB. `data_d9_2021_09_02` is the 16B-position monster - only
+if you have the disk + time; start with `nodes5000pv2_UHO`.)
 
 ## Train (same arch, so the engine loads it unchanged)
 ```powershell

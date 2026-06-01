@@ -16,35 +16,36 @@ Zobrist), **draw detection** (threefold + 50-move, in search and GUI), Qt GUI
 (legal-move-enforcing, contrasting pieces). Strength: comfortably > 2000.
 
 ## Strength
-- [~] **NNUE evaluation** — IN PROGRESS (branch `experiment/nnue`, see docs/NNUE.md).
-      Inference + incremental accumulator + `bullet` training pipeline all work.
-      Nets so far lose to HCE but data scaling is paying off fast (fixed-nodes SPRT
-      vs HCE: 355k pos → −720 Elo; 5M pos → −99 Elo). **Next: more & better data**
-      (10–50M positions, and a higher search-node budget per labelled position than
-      the current 5000 for cleaner targets), then a bigger net / HalfKA. The
-      mechanics are sound; this is now a data+training problem.
-- [ ] **Remote (cloud) data generation + training** — the practical bottleneck is
-      our laptop (CPU for self-play, one RTX 4050 for training). A cheap cloud box
-      makes the NNUE loop far faster and lets it run unattended:
-        * **Data gen**: self-play is embarrassingly parallel and CPU-only. Spin up
-          a high-core spot VM (or a few), run `gen_data` sharded (see
-          `tools/training/gen_shards.ps1`), and store the dataset in object storage
-          (S3/GCS/R2). 10–50M positions in well under an hour on 32–64 cores.
-        * **Training**: a single cloud GPU (T4/A10/L4, spot) trains our small net in
-          minutes; cost is a few reais per run. Host the produced `.nnue` in the
-          same bucket; the engine just needs the file for `EvalFile`.
-        * **Make it reproducible**: a script/Dockerfile that provisions, generates,
-          trains, and uploads the net, so a session can kick it off and poll. Keep
-          everything our-own (clean licence). This is the highest-leverage infra
-          item for move-quality, since NNUE strength is bounded by data volume.
+- [x] **NNUE evaluation** — WORKS AND BEATS HCE (branch `experiment/nnue`, see
+      docs/NNUE.md). Full pipeline done: self-play datagen (`gen_data`), cloud
+      generation (`tools/cloud`), `bullet` training, our NN01 inference with
+      incremental accumulator. Data scale was the lever (fixed-nodes SPRT vs HCE:
+      355k→−720, 5M→−99, **13.4M @8000n → +108 Elo, LOS 100%**). Net embedded in
+      the binary (`tools/embed_net.py`); UCI `Eval` option + GUI menu switch
+      HCE/NNUE. AVX2-optimized (Lizard SCReLU); wall-clock parity-to-better vs HCE.
+      Remaining NNUE follow-ups below.
+- [ ] **NNUE next steps** (now that it beats HCE):
+        * **Bootstrapping** is now valid — regenerate data labeled by the current
+          net (`gen_data <...> <net>` / `gen_shards -Net`), retrain, SPRT. Each
+          round's teacher is stronger. (Was −79 Elo when tried prematurely.)
+        * **More/better data** (30–50M) and **bigger net / HalfKA king-buckets** for
+          the next jump in eval quality.
+        * **Flip the engine default to NNUE** once a wall-clock SPRT confirms it's
+          clearly ahead (today: load embedded net at startup instead of HCE).
+- [x] **Remote (cloud) data generation** — DONE. `tools/cloud/` (GCP spot VM:
+      `startup.sh` builds gen_data headless, shards across all cores, uploads to a
+      GCS bucket, self-deletes) + `GCP_GUIA_PASSO_A_PASSO.md` (PT, beginner). Train
+      locally on the RTX 4050. Gotchas learned & fixed: 32-vCPU new-account quota
+      (use c2d-standard-32), `--scopes=storage-rw,compute-rw` (self-delete needs
+      compute), no `set -e`+`tee` (SIGPIPE killed a run). ~13M positions ≈ <$1.
+- [x] **NNUE inference SIMD** — DONE. AVX2 accumulator add/remove + Lizard SCReLU
+      forward in `nnue.cpp`, bit-exact vs scalar (verified by node counts +
+      `accumulator_matches_refresh`). NPS 471k→583k. Scalar fallback kept for
+      non-AVX2 builds. Further headroom: int8 output layer / `maddubs` like SF.
 - [ ] **SEE in move ordering** — currently SEE is only a quiescence filter. Order
       captures by SEE (good/equal above killers, losing captures last) and add
       SEE-based pruning of losing captures at low depth in the main search.
       Watch cost: SEE per move at every node is expensive — measure NPS.
-- [ ] **NNUE inference SIMD** — `nnue::forward()` is scalar (~3× slower than HCE).
-      AVX2 over the i16 accumulator (and the SCReLU) recovers most of the gap.
-      Carefully verified — a wrong SIMD pass silently corrupts eval. Only matters
-      once a net is competitive; until then use fixed-nodes SPRT.
 - [ ] **Eval tuning (Texel)** — tune the hand-crafted term weights against a
       labelled position set. Cheap-ish, measurable Elo. Still worth it because HCE
       remains the default/stronger eval until NNUE overtakes it.

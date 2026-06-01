@@ -28,6 +28,11 @@
 #include <random>
 #include <vector>
 
+#if defined(__AVX2__)
+#include <immintrin.h>
+#define NNUE_AVX2 1
+#endif
+
 namespace chess {
 namespace nnue {
 
@@ -133,11 +138,56 @@ void refresh(Accumulator& acc, const Position& pos) {
 // Forward pass from a valid accumulator. The side-to-move's perspective uses the
 // first L1 output weights, the opponent's the second half - so the result is
 // side-to-move-relative (same convention as the HCE evaluate()).
+namespace {
+// Sum over L1 of screlu(acc[i]) * w[i], accumulated in int64 (matches the scalar
+// reference exactly). screlu(x) = clamp(x,0,QA)^2, which can reach QA^2=65025, so
+// screlu*w needs >32 bits in the sum - we widen to int64.
+inline std::int64_t dot_screlu(const std::int16_t* a, const std::int16_t* w) {
+#if NNUE_AVX2
+    const __m256i zero = _mm256_setzero_si256();
+    const __m256i qa   = _mm256_set1_epi16(std::int16_t(QA));
+    __m256i acc0 = _mm256_setzero_si256();   // four int64 lanes
+    __m256i acc1 = _mm256_setzero_si256();
+    for (int i = 0; i < L1; i += 16) {
+        __m256i x = _mm256_load_si256(reinterpret_cast<const __m256i*>(a + i));
+        x = _mm256_min_epi16(_mm256_max_epi16(x, zero), qa);     // clamp [0,QA]
+        __m256i wv = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(w + i));
+        // screlu*w = (x*x)*w. Compute x*w (int32 via madd of x with x*? ) carefully:
+        // do it as madd(x, x) gives x^2 summed in pairs - not what we want per-lane.
+        // Instead: p = x (int16) ; q = x*w (may exceed int16) -> use 32-bit mullo.
+        // Widen x and (x*w) to 32-bit and multiply, in two halves.
+        __m256i xw_lo = _mm256_mullo_epi16(x, wv);               // low 16 bits of x*w
+        __m256i xw_hi = _mm256_mulhi_epi16(x, wv);               // high 16 bits of x*w
+        __m256i xw0   = _mm256_unpacklo_epi16(xw_lo, xw_hi);     // x*w as int32 (lanes 0..7)
+        __m256i xw1   = _mm256_unpackhi_epi16(xw_lo, xw_hi);     // x*w as int32 (lanes 8..15)
+        __m256i x0    = _mm256_unpacklo_epi16(x, zero);          // x as int32 (>=0 so zero-extend ok)
+        __m256i x1    = _mm256_unpackhi_epi16(x, zero);
+        __m256i prod0 = _mm256_mullo_epi32(x0, xw0);             // x*(x*w) = screlu*w, int32
+        __m256i prod1 = _mm256_mullo_epi32(x1, xw1);
+        // widen int32 products to int64 and accumulate
+        acc0 = _mm256_add_epi64(acc0, _mm256_add_epi64(
+                   _mm256_cvtepi32_epi64(_mm256_castsi256_si128(prod0)),
+                   _mm256_cvtepi32_epi64(_mm256_extracti128_si256(prod0, 1))));
+        acc1 = _mm256_add_epi64(acc1, _mm256_add_epi64(
+                   _mm256_cvtepi32_epi64(_mm256_castsi256_si128(prod1)),
+                   _mm256_cvtepi32_epi64(_mm256_extracti128_si256(prod1, 1))));
+    }
+    __m256i acc = _mm256_add_epi64(acc0, acc1);
+    std::int64_t lanes[4];
+    _mm256_storeu_si256(reinterpret_cast<__m256i*>(lanes), acc);
+    return lanes[0] + lanes[1] + lanes[2] + lanes[3];
+#else
+    std::int64_t out = 0;
+    for (int i = 0; i < L1; ++i) out += std::int64_t(screlu(a[i])) * w[i];
+    return out;
+#endif
+}
+} // namespace
+
 int forward(const Accumulator& acc, Color stm) {
     const Color opp = ~stm;
-    std::int64_t out = 0;
-    for (int i = 0; i < L1; ++i) out += std::int64_t(screlu(acc.v[stm][i])) * g_net.outW[i];
-    for (int i = 0; i < L1; ++i) out += std::int64_t(screlu(acc.v[opp][i])) * g_net.outW[L1 + i];
+    std::int64_t out = dot_screlu(acc.v[stm], &g_net.outW[0])
+                     + dot_screlu(acc.v[opp], &g_net.outW[L1]);
 
     out /= QA;                       // SCReLU output is QA*QA*QB; reduce to QA*QB
     out += g_net.outB;               // bias is at QA*QB
@@ -147,18 +197,36 @@ int forward(const Accumulator& acc, Color stm) {
 }
 
 // ---- Incremental updates ----------------------------------------------------
-void add_piece(Accumulator& acc, Color c, PieceType pt, Square sq) {
-    for (Color p = WHITE; p <= BLACK; p = Color(p + 1)) {
-        const std::int16_t* col = &g_net.ftW[std::size_t(feature_index(p, c, pt, sq)) * L1];
-        for (int i = 0; i < L1; ++i) acc.v[p][i] = std::int16_t(acc.v[p][i] + col[i]);
+// One perspective's accumulator += (Add ? +col : -col), over L1 int16. The AVX2
+// path does 16 int16 per instruction; the scalar path is the reference (and the
+// fallback when AVX2 is unavailable). Both must produce identical results - the
+// accumulator_matches_refresh gate verifies it.
+namespace {
+template <bool Add>
+inline void acc_update(std::int16_t* dst, const std::int16_t* col) {
+#if NNUE_AVX2
+    static_assert(L1 % 16 == 0, "L1 must be a multiple of 16 for the AVX2 path");
+    for (int i = 0; i < L1; i += 16) {
+        __m256i d = _mm256_load_si256(reinterpret_cast<const __m256i*>(dst + i));
+        __m256i w = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(col + i));
+        d = Add ? _mm256_add_epi16(d, w) : _mm256_sub_epi16(d, w);
+        _mm256_store_si256(reinterpret_cast<__m256i*>(dst + i), d);
     }
+#else
+    for (int i = 0; i < L1; ++i)
+        dst[i] = std::int16_t(Add ? dst[i] + col[i] : dst[i] - col[i]);
+#endif
+}
+} // namespace
+
+void add_piece(Accumulator& acc, Color c, PieceType pt, Square sq) {
+    for (Color p = WHITE; p <= BLACK; p = Color(p + 1))
+        acc_update<true>(acc.v[p], &g_net.ftW[std::size_t(feature_index(p, c, pt, sq)) * L1]);
 }
 
 void remove_piece(Accumulator& acc, Color c, PieceType pt, Square sq) {
-    for (Color p = WHITE; p <= BLACK; p = Color(p + 1)) {
-        const std::int16_t* col = &g_net.ftW[std::size_t(feature_index(p, c, pt, sq)) * L1];
-        for (int i = 0; i < L1; ++i) acc.v[p][i] = std::int16_t(acc.v[p][i] - col[i]);
-    }
+    for (Color p = WHITE; p <= BLACK; p = Color(p + 1))
+        acc_update<false>(acc.v[p], &g_net.ftW[std::size_t(feature_index(p, c, pt, sq)) * L1]);
 }
 
 bool accumulator_matches_refresh(const Accumulator& acc, const Position& pos) {

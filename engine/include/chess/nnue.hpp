@@ -47,8 +47,8 @@ constexpr int feature_index(Color perspective, Color pieceColor, PieceType pt, S
 // ---- Accumulator: PER-POSITION hidden state ---------------------------------
 // v[perspective][neuron]. Kept incrementally in make/unmake (Phase 2), mirroring
 // the incremental Zobrist key. Each thread's Position owns one - never shared.
-struct Accumulator {
-    std::int16_t v[COLORS][L1] = {};
+struct alignas(32) Accumulator {   // 32-byte aligned for AVX2 loads/stores
+    alignas(32) std::int16_t v[COLORS][L1] = {};
     bool         valid = false;   // false => must be refreshed from scratch
 };
 

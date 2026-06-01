@@ -92,13 +92,13 @@ Salve o arquivo.
 
 ## Parte 6 — Ligar a máquina (o "burst")
 
-Um único comando cria a VM de **60 núcleos spot**, que roda o script e se deleta no
+Um único comando cria a VM de **56 núcleos spot**, que roda o script e se deleta no
 fim. No PowerShell, **dentro da pasta do projeto** (onde está `tools/cloud/`):
 
 ```powershell
 gcloud compute instances create chess-datagen `
   --zone=us-central1-a `
-  --machine-type=c2d-standard-60 `
+  --machine-type=c2d-standard-56 `
   --provisioning-model=SPOT `
   --instance-termination-action=DELETE `
   --image-family=debian-12 --image-project=debian-cloud `
@@ -106,8 +106,12 @@ gcloud compute instances create chess-datagen `
   --metadata-from-file=startup-script=tools/cloud/startup.sh
 ```
 
+> Nota: a família `c2d` vem em 2/4/8/16/32/**56**/112 vCPU — **não existe `c2d-standard-60`**.
+> Use `c2d-standard-56`. (Se quiser exatamente 60, a família mais nova `c3d` tem:
+> `--machine-type=c3d-standard-60`. Qualquer uma serve — é tudo CPU.)
+
 O que cada parte faz (resumido):
-- `c2d-standard-60` = 60 vCPU. `--provisioning-model=SPOT` = barato.
+- `c2d-standard-56` = 56 vCPU. `--provisioning-model=SPOT` = barato.
 - `--instance-termination-action=DELETE` = se o Google interromper, a VM some (não
   fica cobrando disco parado).
 - `--scopes=storage-read-write` = deixa a VM gravar no seu bucket.

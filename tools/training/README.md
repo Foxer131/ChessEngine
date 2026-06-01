@@ -71,6 +71,58 @@ trainer's quantization. Verify the engine loads it and the symmetry sanity holds
 ```
 Keep iterating data volume / training epochs / net size until SPRT clears +50 Elo.
 
+## Execution guide (decided: train LOCAL on the user's NVIDIA GPU; no cloud)
+
+Hardware decision (measured): data gen is ~289 pos/s/thread => ~1M positions in
+~5 min across 12 cores, fully local. Training a 768x256 net on a local NVIDIA GPU
+is minutes. **Cloud is unnecessary** given a local CUDA GPU.
+
+### Step A - data (done by gen_shards.ps1)
+`powershell -File tools\training\gen_shards.ps1 -Shards 12 -Games 290 -Nodes 5000`
+=> `C:\chess_sprt\data\all.txt` (~1M lines of `fen | cp | wdl`, cp White-relative).
+
+### Step B - install bullet (one time)
+1. Rust: install via rustup (https://rustup.rs).
+2. CUDA Toolkit (the bullet README pins a supported version; the NVIDIA driver
+   alone is not enough - bullet compiles CUDA kernels).
+3. `git clone https://github.com/jw1912/bullet`.
+
+### Step C - convert our data to bullet's input
+bullet wants its own record type. Either use a text/`montecarlo`-style loader if
+available in the bullet version, or write a ~30-line converter:
+- parse each `fen | cp | wdl` line,
+- set features from the FEN using OUR scheme (see `feature_index` in nnue.hpp:
+  `colorBucket*384 + (pt-1)*64 + sq`, black perspective mirrors `sq^56`),
+- target = blend of `sigmoid(cp/EVAL_SCALE)` and `wdl` (standard NNUE; bullet has
+  a `WDL` lambda knob).
+
+### Step D - architecture in bullet (MUST match nnue.cpp exactly)
+- inputs 768, feature transformer -> **256** per perspective, concat 512,
+  hidden `512 -> 32 -> 32 -> 1`, activation **clipped-ReLU (clip at 1.0 in float,
+  127 in quantized)**.
+- Our integer forward (nnue.cpp) is, per layer:
+  `act = clamp( (sum(int)) >> FT_SHIFT , 0, QA )` with **QA=127, FT_SHIFT=6**, and
+  final `eval_cp = out_sum / OUT_SCALE` with **OUT_SCALE=16**.
+- So the **quantization the exporter must produce**: weights scaled so that the
+  integer sums reproduce the float pass after the `>>6` / `/16`. Concretely a
+  common choice: feature-transformer weights `round(w * 64)` (int16), hidden
+  weights `round(w * 64)` (int8, keep in range!), output `round(w * 16)`. If the
+  exported net evaluates wrong, this scaling is almost always why - verify with
+  the symmetry/sanity checks before blaming training.
+
+### Step E - export to our NN01 format
+bullet won't write NN01, so add `tools/training/export_nnue.py`: read bullet's
+checkpoint, quantize per Step D, and `struct.pack` in the exact order
+`nnue.cpp::load()` reads (see `make_test_net.py` for the layout - same packing,
+real weights). Output e.g. `C:\chess_sprt\data\net.nnue`.
+
+### Step F - validate + SPRT
+1. Load it: `setoption name EvalFile value C:\chess_sprt\data\net.nnue`; confirm
+   `info string EvalFile loaded`.
+2. Sanity: startpos eval near 0 and symmetric; a position up a queen is large +.
+3. SPRT net vs HCE (build patch with EvalFile set, base without). Target >= +50 Elo.
+   If it loses, iterate: more data, more epochs, check the quantization (Step D).
+
 ## Notes / gotchas
 
 - **Licence:** our own data + own net = clean (not GPL). Don't import SF nets.

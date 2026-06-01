@@ -78,8 +78,10 @@ double play_game(std::mt19937_64& rng, std::uint64_t nodes,
 
             int whiteCp = (pos.side_to_move() == WHITE) ? r.score : -r.score;
 
-            // Record only quiet positions: not in check, best move not a capture.
-            if (!pos.in_check() && !is_capture(pos, chosen))
+            // Record only quiet positions: not in check, best move not a capture,
+            // and a real centipawn score (skip mate scores - they aren't an eval
+            // and would saturate the training sigmoid).
+            if (!pos.in_check() && !is_capture(pos, chosen) && std::abs(whiteCp) < 29000)
                 lines.emplace_back(pos.to_fen(), whiteCp);
 
             // Early adjudication when the score is lopsided for a few plies.

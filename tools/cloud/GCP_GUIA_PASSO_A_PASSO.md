@@ -118,11 +118,13 @@ O que cada parte faz (resumido):
 - `--metadata-from-file=startup-script=...` = manda o `startup.sh` para a VM rodar
   sozinha no boot.
 
-> Se aparecer erro de **cota** (quota) de CPUs: contas novas às vezes têm limite < 60
-> vCPU. Soluções: (a) peça aumento de cota no console (IAM & Admin → Cotas →
-> "Compute Engine API, CPUs" → editar) — costuma ser aprovado em minutos; ou
-> (b) use `c2d-standard-32` no comando acima (32 núcleos; gera na metade da
-> velocidade, ainda barato).
+> **Erro de cota** (quota) de CPUs — contas novas têm limite global de **32 vCPU**
+> (`Quota 'CPUS_ALL_REGIONS' exceeded. Limit: 32.0`). É o caso mais comum. Soluções:
+> - **(a) Imediata:** use `--machine-type=c2d-standard-32` (cabe na cota; gera ~29M
+>   posições/h — mais que suficiente para uma rede). **Recomendado.**
+> - **(b) Para 56/60 vCPU:** Console → IAM & Admin → **Cotas** → filtre
+>   `CPUS_ALL_REGIONS` → **Editar** → peça 64 → justificativa "batch compute".
+>   Aprovação em minutos a horas; depois use `c2d-standard-56`.
 
 ---
 

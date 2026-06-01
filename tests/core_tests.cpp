@@ -326,6 +326,7 @@ int main() {
         CHECK(perft(pf, 1) == 48);
         CHECK(perft(pf, 2) == 2039);
         CHECK(perft(pf, 3) == 97862);
+        CHECK(perft(pf, 4) == 4085603);   // deep: exercises castling/ep/pins heavily
     }
     {   // position 3 (CPW) - tricky en-passant / promotion interactions
         Position pf;
@@ -334,6 +335,22 @@ int main() {
         CHECK(perft(pf, 2) == 191);
         CHECK(perft(pf, 3) == 2812);
         CHECK(perft(pf, 4) == 43238);
+        CHECK(perft(pf, 5) == 674624);
+    }
+    {   // position 4 (CPW) - promotions, pins, and a position where many engines bug
+        Position pf;
+        pf.set_fen("r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1");
+        CHECK(perft(pf, 1) == 6);
+        CHECK(perft(pf, 2) == 264);
+        CHECK(perft(pf, 3) == 9467);
+        CHECK(perft(pf, 4) == 422333);
+    }
+    {   // position 5 (CPW) - a notorious bug-catcher for legal movegen
+        Position pf;
+        pf.set_fen("rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8");
+        CHECK(perft(pf, 1) == 44);
+        CHECK(perft(pf, 2) == 1486);
+        CHECK(perft(pf, 3) == 62379);
     }
 
     // ---- NNUE incremental accumulator: the correctness gate ----

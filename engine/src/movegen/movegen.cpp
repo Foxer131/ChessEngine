@@ -116,14 +116,71 @@ void generate_legal(Position& pos, MoveList& list) {
     MoveList pseudo;
     generate_pseudo(pos, pseudo);
 
-    const Color us = pos.side_to_move();
+    const Color    us   = pos.side_to_move();
+    const Color    them = ~us;
+    const Square   ksq  = pos.king_square(us);
+    const Bitboard occ  = pos.pieces();
+
+    // Enemy pieces giving check, and how many.
+    const Bitboard checkers    = pos.attackers_to(ksq, occ) & pos.pieces(them);
+    const int      numCheckers = popcount(checkers);
+
+    // Pinned own pieces: for each enemy slider aligned with our king, if exactly one
+    // piece sits between them and it's ours, that piece is pinned to the king ray.
+    Bitboard pinned  = 0;
+    Bitboard pinners = ((pos.pieces(them, BISHOP) | pos.pieces(them, QUEEN)) & bishop_attacks(ksq, 0))
+                     | ((pos.pieces(them, ROOK)   | pos.pieces(them, QUEEN)) & rook_attacks(ksq, 0));
+    while (pinners) {
+        Square sq = pop_lsb(pinners);
+        Bitboard b = between_bb(ksq, sq) & occ;
+        if (popcount(b) == 1 && (b & pos.pieces(us)))
+            pinned |= b;
+    }
+
+    // In single check, a non-king move is legal only if it lands on the checker or
+    // interposes between it and the king. In double check, only the king can move.
+    Bitboard checkMask = ~Bitboard(0);
+    if (numCheckers == 1)
+        checkMask = checkers | between_bb(ksq, lsb(checkers));
+
     for (Move m : pseudo) {
-        Position::Undo u;
-        pos.make_move(m, u);
-        // Keep the move only if it does not leave our own king in check.
-        if (!pos.is_attacked(pos.king_square(us), ~us))
-            list.add(m);
-        pos.unmake_move(m, u);
+        const Square   from = m.from_sq();
+        const Square   to   = m.to_sq();
+        const MoveType ty   = m.type_of();
+
+        if (from == ksq) {
+            // King move: destination must be unattacked with the king removed from
+            // occupancy (so an enemy slider sees through the king's old square).
+            // Castling is rejected while in check (its path squares were already
+            // verified safe in generate_castling).
+            if (numCheckers && ty == CASTLING) continue;
+            Bitboard occNoKing = occ ^ square_bb(ksq);
+            if (!(pos.attackers_to(to, occNoKing) & pos.pieces(them)))
+                list.add(m);
+            continue;
+        }
+
+        if (numCheckers >= 2) continue;   // double check: only king moves
+
+        // En passant can expose the king along a rank (both pawns leave it at once),
+        // which pins don't catch. Verify this rare case with make/unmake.
+        if (ty == EN_PASSANT) {
+            Position::Undo u;
+            pos.make_move(m, u);
+            bool ok = !pos.is_attacked(pos.king_square(us), them);
+            pos.unmake_move(m, u);
+            if (ok) list.add(m);
+            continue;
+        }
+
+        // Must resolve the check (capture/block) if in check.
+        if (!(square_bb(to) & checkMask)) continue;
+
+        // A pinned piece may only move along the king<->piece line.
+        if ((square_bb(from) & pinned) && !(square_bb(to) & line_bb(ksq, from)))
+            continue;
+
+        list.add(m);
     }
 }
 

@@ -16,6 +16,17 @@ HCE. Read `CLAUDE.md` first (build path gotcha, "user codes along", SPRT harness
 > higher search nodes per label than 5000 for cleaner targets); (b) bigger net /
 > HalfKA king-buckets; (c) train longer. The mechanics are not suspect.
 
+### Bootstrapping is PREMATURE until NNUE > HCE (tested, -79 Elo)
+We tried the AlphaZero-style loop early: generated 3M positions LABELED BY net5m
+(via `gen_data <...> <net>`), trained v2, SPRT v2 vs v1(net5m) at 20k nodes =>
+**v2 was -79.5 Elo WORSE** (400 games, H0). Why: bootstrapping only helps when the
+teacher (search guided by the current net) produces *better* labels than what you
+had. But net5m is still weaker than the HCE, so labeling with it is learning from
+a worse teacher than the HCE we already use - it amplifies the net's weaknesses.
+**Rule: keep labeling with the HCE (the best evaluator we have) until a net beats
+the HCE in SPRT. Only then does net-labeled bootstrapping start to pay off.** The
+`-Net`/`[evalfile]` machinery is correct and ready; just don't use it yet.
+
 ## Hard-won lessons (read before touching NNUE again)
 
 1. **Architecture matches `bullet`'s `simple.rs` exactly** so we load its raw

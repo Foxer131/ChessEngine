@@ -61,25 +61,28 @@ void MainWindow::setupMenu() {
     gameMenu->addAction(tr("E&xit"), this, &QWidget::close);
 
     // Evaluation selector: HCE (hand-crafted) vs NNUE (neural net). Mutually
-    // exclusive radio items. Default HCE (currently the stronger at real time
-    // control; NNUE wins at fixed nodes but is slower per eval until SIMD).
+    // exclusive radio items - a manual override. New Game also auto-picks per mode
+    // (depth-limited -> NNUE, which is stronger at equal depth; timed -> HCE, which
+    // is stronger on the clock until NNUE inference is faster).
     auto* evalMenu = menuBar()->addMenu(tr("E&valuation"));
     auto* group = new QActionGroup(this);
     group->setExclusive(true);
-    auto* hce = evalMenu->addAction(tr("&HCE (hand-crafted)"));
-    auto* nnue = evalMenu->addAction(tr("&NNUE (neural net)"));
-    hce->setCheckable(true);
-    nnue->setCheckable(true);
-    group->addAction(hce);
-    group->addAction(nnue);
-    hce->setChecked(!useNnue_);
-    nnue->setChecked(useNnue_);
-    connect(hce,  &QAction::triggered, this, [this] { setEval(false); });
-    connect(nnue, &QAction::triggered, this, [this] { setEval(true);  });
+    actHce_  = evalMenu->addAction(tr("&HCE (hand-crafted)"));
+    actNnue_ = evalMenu->addAction(tr("&NNUE (neural net)"));
+    actHce_->setCheckable(true);
+    actNnue_->setCheckable(true);
+    group->addAction(actHce_);
+    group->addAction(actNnue_);
+    actHce_->setChecked(!useNnue_);
+    actNnue_->setChecked(useNnue_);
+    connect(actHce_,  &QAction::triggered, this, [this] { setEval(false); });
+    connect(actNnue_, &QAction::triggered, this, [this] { setEval(true);  });
 }
 
 void MainWindow::setEval(bool useNnue) {
     useNnue_ = useNnue;
+    if (actHce_)  actHce_->setChecked(!useNnue);   // keep the menu checkmark in sync
+    if (actNnue_) actNnue_->setChecked(useNnue);
     engine_->setOption(QStringLiteral("Eval"), useNnue ? QStringLiteral("NNUE")
                                                        : QStringLiteral("HCE"));
     log(useNnue ? tr("Evaluation: NNUE (neural net).")
@@ -133,6 +136,11 @@ void MainWindow::newGame() {
     useMovetime_ = dlg.useMovetime();
     depth_       = dlg.depth();
     movetimeMs_  = dlg.movetimeMs();
+
+    // Pick the eval that is strongest for this mode (SPRT-measured): depth-limited
+    // play -> NNUE (+Elo at equal depth); timed play -> HCE (faster per node, wins
+    // on the clock for now). The Evaluation menu can still override after this.
+    setEval(/*useNnue=*/!useMovetime_);
 
     // If a search from the previous game is still running, abort it and ignore
     // the (now stale) bestmove it will emit, so it can't land on the new board.

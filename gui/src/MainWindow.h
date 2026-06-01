@@ -18,6 +18,7 @@
 class BoardWidget;
 class UciEngine;
 class QPlainTextEdit;
+class QAction;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -48,6 +49,8 @@ private:
     BoardWidget*   boardView_ = nullptr;
     UciEngine*     engine_ = nullptr;
     QPlainTextEdit* logView_ = nullptr;
+    QAction*    actHce_ = nullptr;       // Evaluation menu radio items (for syncing
+    QAction*    actNnue_ = nullptr;      // the checkmark when the mode auto-picks)
 
     QString     enginePath_;
     QStringList moves_;                 // game moves in UCI long algebraic

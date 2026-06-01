@@ -29,6 +29,9 @@ public:
 
     void sendStop();   // tell the engine to stop searching now
 
+    // Set a UCI option, e.g. setOption("Eval", "NNUE"). Safe to call while idle.
+    void setOption(const QString& name, const QString& value);
+
 signals:
     void ready();                       // engine answered uciok/readyok
     void bestMove(const QString& uci);  // engine returned "bestmove <uci>"

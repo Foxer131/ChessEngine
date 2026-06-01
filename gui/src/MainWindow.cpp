@@ -7,6 +7,7 @@
 #include <QApplication>
 #include <QMenuBar>
 #include <QMenu>
+#include <QActionGroup>
 #include <QStatusBar>
 #include <QFileDialog>
 #include <QInputDialog>
@@ -40,6 +41,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(engine_, &UciEngine::bestMove,    this, &MainWindow::onBestMove);
     connect(engine_, &UciEngine::infoLine,    this, &MainWindow::onInfoLine);
     connect(engine_, &UciEngine::engineError, this, &MainWindow::onEngineError);
+    // Re-apply the chosen eval whenever the engine (re)starts (it defaults to HCE,
+    // so only NNUE needs sending). `ready` fires on uciok/readyok.
+    connect(engine_, &UciEngine::ready, this, [this] {
+        if (useNnue_) engine_->setOption(QStringLiteral("Eval"), QStringLiteral("NNUE"));
+    });
 
     setupMenu();
     tryAutoLoadEngine();
@@ -53,6 +59,31 @@ void MainWindow::setupMenu() {
     gameMenu->addAction(tr("Set &Engine..."), this, &MainWindow::chooseEngine);
     gameMenu->addSeparator();
     gameMenu->addAction(tr("E&xit"), this, &QWidget::close);
+
+    // Evaluation selector: HCE (hand-crafted) vs NNUE (neural net). Mutually
+    // exclusive radio items. Default HCE (currently the stronger at real time
+    // control; NNUE wins at fixed nodes but is slower per eval until SIMD).
+    auto* evalMenu = menuBar()->addMenu(tr("E&valuation"));
+    auto* group = new QActionGroup(this);
+    group->setExclusive(true);
+    auto* hce = evalMenu->addAction(tr("&HCE (hand-crafted)"));
+    auto* nnue = evalMenu->addAction(tr("&NNUE (neural net)"));
+    hce->setCheckable(true);
+    nnue->setCheckable(true);
+    group->addAction(hce);
+    group->addAction(nnue);
+    hce->setChecked(!useNnue_);
+    nnue->setChecked(useNnue_);
+    connect(hce,  &QAction::triggered, this, [this] { setEval(false); });
+    connect(nnue, &QAction::triggered, this, [this] { setEval(true);  });
+}
+
+void MainWindow::setEval(bool useNnue) {
+    useNnue_ = useNnue;
+    engine_->setOption(QStringLiteral("Eval"), useNnue ? QStringLiteral("NNUE")
+                                                       : QStringLiteral("HCE"));
+    log(useNnue ? tr("Evaluation: NNUE (neural net).")
+                : tr("Evaluation: HCE (hand-crafted)."));
 }
 
 void MainWindow::tryAutoLoadEngine() {

@@ -65,6 +65,11 @@ void UciEngine::sendStop() {
         send(QStringLiteral("stop"));
 }
 
+void UciEngine::setOption(const QString& name, const QString& value) {
+    if (isRunning())
+        send(QStringLiteral("setoption name %1 value %2").arg(name, value));
+}
+
 void UciEngine::send(const QString& command) {
     if (proc_.state() == QProcess::NotRunning) return;
     proc_.write(command.toUtf8() + '\n');

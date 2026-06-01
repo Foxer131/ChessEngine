@@ -27,6 +27,7 @@ public:
 private slots:
     void newGame();
     void chooseEngine();
+    void setEval(bool useNnue);   // switch engine eval: HCE (false) / NNUE (true)
     void onMoveRequested(int fromFile, int fromRank, int toFile, int toRank);
     void onBestMove(const QString& uci);
     void onInfoLine(const QString& line);
@@ -56,6 +57,7 @@ private:
     int  movetimeMs_ = 1000;
     bool gameActive_ = false;
 
+    bool useNnue_ = false;          // chosen eval: false = HCE (default), true = NNUE
     bool engineThinking_ = false;   // a search request is outstanding
     int  pendingDiscards_ = 0;      // stale bestmoves (from aborted searches) to ignore
 

@@ -5,21 +5,24 @@ This is the plan for replacing the hand-crafted evaluation (HCE) with an **NNUE*
 available to a classical alpha-beta engine: plausibly **+300–600 Elo** over our
 HCE. Read `CLAUDE.md` first (build path gotcha, "user codes along", SPRT harness).
 
-> Status: **NNUE BEATS HCE — milestone reached** (branch `experiment/nnue`).
-> Data scale was the whole story (fixed-nodes SPRT vs HCE, 20k nodes):
->   - 355k positions          -> 1.5%  (-720 Elo)  : total collapse
->   - 5.04M positions @5000n   -> 36%   (-99 Elo)   : plays real chess, just below HCE
->   - **13.4M positions @8000n -> 65%  (+108 Elo)** : **beats the HCE (LOS 100%)**
-> The jump from -99 to +108 (2.7x data + deeper 8000-node labels) crossed the
-> threshold. NNUE is now the stronger eval and should be the DEFAULT (load the net
-> at startup; HCE becomes the fallback when no net is present). Net file:
-> `C:\chess_sprt\data\net13m.nnue` (our NN01 format, 768->256x2->1).
+> Status: **NNUE IS THE DEFAULT EVAL — merged to `main`, beats HCE on the clock.**
+> The journey (fixed-nodes SPRT vs HCE unless noted):
+>   - 355k positions          -> -720 Elo   : total collapse (too little data)
+>   - 5.04M @5000n self-play   -> -99 Elo    : plays real chess, just below HCE
+>   - 13.4M @8000n self-play   -> +108 Elo   : first net to beat HCE (fixed nodes)
+>   - **net_pub: public 37GB Leela/SF binpack (nodes5000pv2_UHO, ODbL)** ->
+>     **+240 Elo vs the 13.4M net, and +237 vs HCE at WALL-CLOCK 8+0.08** (LOS 100%).
+> **Data quality/volume was the whole story.** net_pub is embedded in the binary
+> (`tools/embed_net.py` -> `embedded_net.cpp`) and loaded at startup; UCI `Eval`
+> defaults to NNUE. Source net kept at `C:\chess_sprt\data\net_pub.nnue`
+> (our NN01 format, 768->256x2->1).
 >
-> Next levers now that NNUE > HCE: (a) **bootstrapping is finally valid** - label
-> the next data with net13m (search guided by it now beats HCE-guided search);
-> (b) more data still helps (30-50M); (c) bigger net / HalfKA king-buckets for the
-> next big step; (d) SIMD the forward pass (it's ~3x slower than HCE) to convert
-> the eval win into more nodes/sec too.
+> Next levers: (a) **even more / bigger public data** (the 16B `data_d9` binpack);
+> (b) **bigger net / HalfKA king-buckets** (the next quality jump; needs int8 for
+> speed); (c) **int8 + maddubs** forward for more nodes/sec; (d) **bootstrapping is
+> now valid** - label new data with net_pub (search guided by it beats HCE). The
+> wall-clock win already stands because the legal-movegen rewrite (+163 Elo, on
+> `main`) roughly doubled NPS, paying for NNUE's eval cost. See docs/TODO.md.
 
 ### Speed: eval-quality win vs eval-cost (the wall-clock story)
 The +108 is at FIXED NODES (isolates eval quality). NNUE costs more per eval, so at

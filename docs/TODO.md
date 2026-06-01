@@ -6,32 +6,31 @@ along" style, file-purpose convention). Items are roughly priority-ordered
 within each section. Each carries *what / why / how / risks*.
 
 ## Status (what already works)
-Bitboards + magic sliders, perft-validated move generation, make/unmake +
-Zobrist, FEN, **expanded eval** (PeSTO tapered + mobility / bishop pair / rook
-open file / pawn structure), **modern search** (PVS, iterative deepening,
-aspiration, TT kept across moves, quiescence + **SEE** pruning, move ordering,
-null move, RFP/futility/LMP, log-LMR, check extensions), **interruptible async
-search** (worker thread + `stop_search`/`clear_stop`), **opening book** (own
-Zobrist), **draw detection** (threefold + 50-move, in search and GUI), Qt GUI
-(legal-move-enforcing, contrasting pieces). Strength: comfortably > 2000.
+Bitboards + magic sliders, **direct legal move generation** (checkers+pinned,
+perft-validated on 5 CPW positions; +163 Elo over the old filter), make/unmake +
+Zobrist, FEN, **NNUE evaluation (default, beats HCE ~+237 Elo wall-clock)** with
+the hand-crafted **HCE kept as a selectable option**, **modern search** (PVS,
+iterative deepening, aspiration, shared lockless TT, quiescence + **SEE**, move
+ordering, null move, RFP/futility/LMP, log-LMR, check extensions), **Lazy SMP**
+(UCI `Threads`, +127 Elo 8v1), **opening book**, **draw + mate/stalemate
+detection** (engine + GUI), Qt GUI (legal-move-enforcing, eval selector). The
+NNUE training + cloud-datagen pipeline is built. Strength: well above the old
+HCE-only engine.
 
 ## Strength
-- [x] **NNUE evaluation** — WORKS AND BEATS HCE (branch `experiment/nnue`, see
-      docs/NNUE.md). Full pipeline done: self-play datagen (`gen_data`), cloud
-      generation (`tools/cloud`), `bullet` training, our NN01 inference with
-      incremental accumulator. Data scale was the lever (fixed-nodes SPRT vs HCE:
-      355k→−720, 5M→−99, **13.4M @8000n → +108 Elo, LOS 100%**). Net embedded in
-      the binary (`tools/embed_net.py`); UCI `Eval` option + GUI menu switch
-      HCE/NNUE. AVX2-optimized (Lizard SCReLU); wall-clock parity-to-better vs HCE.
-      Remaining NNUE follow-ups below.
-- [ ] **NNUE next steps** (now that it beats HCE):
-        * **Bootstrapping** is now valid — regenerate data labeled by the current
-          net (`gen_data <...> <net>` / `gen_shards -Net`), retrain, SPRT. Each
-          round's teacher is stronger. (Was −79 Elo when tried prematurely.)
-        * **More/better data** (30–50M) and **bigger net / HalfKA king-buckets** for
-          the next jump in eval quality.
-        * **Flip the engine default to NNUE** once a wall-clock SPRT confirms it's
-          clearly ahead (today: load embedded net at startup instead of HCE).
+- [x] **NNUE evaluation — DONE and is the DEFAULT** (on `main`, see docs/NNUE.md).
+      Full pipeline: self-play datagen (`gen_data`), cloud generation
+      (`tools/cloud`), `bullet` training, our NN01 inference with incremental AVX2
+      accumulator, embedded in the binary (`tools/embed_net.py`), UCI `Eval` + GUI
+      switch. The current net (`net_pub`) is trained on **public Leela/SF data**
+      (ODbL) and beats HCE **~+237 Elo wall-clock** (+350 fixed-nodes); public data
+      beat our 13.4M self-play net by +240. Data quality/volume was the lever.
+- [ ] **NNUE next steps** (to push further):
+        * **More / bigger public data** (the 16B `data_d9` binpack) and **bigger
+          net / HalfKA king-buckets** — the next quality jump (HalfKA wants int8).
+        * **int8 + `maddubs`** forward for more nodes/sec (forward dominates cost).
+        * **Bootstrapping** is now valid — label new data with `net_pub`
+          (`gen_data <...> <net>` / `gen_shards -Net`), retrain, SPRT.
 - [x] **Remote (cloud) data generation** — DONE. `tools/cloud/` (GCP spot VM:
       `startup.sh` builds gen_data headless, shards across all cores, uploads to a
       GCS bucket, self-deletes) + `GCP_GUIA_PASSO_A_PASSO.md` (PT, beginner). Train
@@ -46,19 +45,18 @@ Zobrist), **draw detection** (threefold + 50-move, in search and GUI), Qt GUI
       captures by SEE (good/equal above killers, losing captures last) and add
       SEE-based pruning of losing captures at low depth in the main search.
       Watch cost: SEE per move at every node is expensive — measure NPS.
-- [ ] **Eval tuning (Texel)** — tune the hand-crafted term weights against a
-      labelled position set. Cheap-ish, measurable Elo. Still worth it because HCE
-      remains the default/stronger eval until NNUE overtakes it.
+- [ ] **Eval tuning (Texel)** — tune the hand-crafted term weights. Lower priority
+      now that NNUE is the default/stronger eval; only worth it to strengthen the
+      secondary HCE option.
 - [ ] **More search heuristics** — singular extensions, internal iterative
       reductions, history gravity/aging. Each small; validate with SPRT. NOTE:
       improving-flag + continuation-history + history-based LMR were tried together
       and regressed (reverted) — re-attempt individually, tuned, with SPRT.
 
 ## Speed (NPS / depth)
-- [ ] **Pin/check-aware legal move generation** — #1 NPS win. Today
-      `generate_legal` does make/unmake per pseudo-move to test legality (~2x
-      work). Generate only legal moves directly (compute pinned pieces + check
-      evasions). Substantial, bug-prone rewrite — **re-validate with perft**.
+- [x] **Direct legal move generation — DONE** (`movegen.cpp`, on `main`). checkers +
+      pinned filter, no make/unmake per move (en-passant verified once). ~2x NPS
+      (NNUE 583k→1325k), **+163 Elo** SPRT. Validated on 5 CPW perft positions.
 - [x] **Lazy SMP (multithreading)** — DONE (branch `experiment/hardware-smp`).
       N `Worker`s search the same root sharing only a `TranspositionTable`
       (lockless: key-validated, torn writes tolerated). Each Worker owns its
@@ -83,6 +81,8 @@ Zobrist), **draw detection** (threefold + 50-move, in search and GUI), Qt GUI
 - [ ] **Syzygy endgame tablebases** — optional, large dependency.
 
 ## GUI (Qt)
+- [x] **Mate/stalemate detection** + **Evaluation menu** (HCE/NNUE) + **new-game
+      freeze fixed** (game-id instead of a discard counter) — all done.
 - [ ] **Highlight legal moves** when a piece is selected (query via chess_core
       `generate_legal`, which the GUI already links).
 - [ ] Move list / PGN pane, a clock, board-flip toggle, takeback/undo,
@@ -108,8 +108,6 @@ Elo-per-effort. None are committed; all need an SPRT before trusting.
       AND higher quality labels — score with a real search depth/node budget, filter
       noisy/early positions, dedupe, and mix in positions from games vs varied
       opponents (not just self-play) to reduce bias. See the cloud item above.
-- [ ] **Pin/check-aware legal movegen** (also under Speed): ~2× NPS, which is Elo at
-      fixed time, and it benefits every search feature. Big, perft-gated rewrite.
 - [ ] **Aspiration/time-management tuning**: smarter soft/hard time limits and
       not starting an iteration we can't finish — converts wasted time into depth.
 - [ ] **History/heuristic retuning** (the reverted batch, redone right): capture

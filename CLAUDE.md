@@ -19,19 +19,26 @@ Where the engine is *today* (so a new session can pick up TODOs without re-deriv
   a shared lockless `TranspositionTable`, injected via `SharedState`
   (dependency injection). **Add new search heuristics as `Worker` fields** — you
   then never reason about threads. Threads=1 must stay bit-identical.
+- **Move generation is DIRECT-LEGAL** (`engine/src/movegen/movegen.cpp`): computes
+  checkers + pinned pieces and filters by mask/ray — no make/unmake per move
+  (except en-passant, verified once). **SPRT-measured +163 Elo** vs the old
+  pseudo+make/unmake filter (it ~2x'd NPS, especially with NNUE). Uses
+  `between_bb`/`line_bb` tables. **Perft is the correctness gate** — the 5 CPW
+  positions are in `core_tests.cpp` (incl. Kiwipete d4=4085603); never touch
+  movegen without re-running them.
 - **Evaluation — the engine has BOTH, uses ONE at a time (a runtime switch):**
   `evaluate()` in `engine/src/eval/eval.cpp` does `if (nnue::is_loaded()) NNUE else HCE`.
-  Pick via UCI `Eval` option (HCE / NNUE) or the GUI "Evaluation" menu.
-  - **NNUE** (`engine/src/eval/nnue.cpp`) — a trained net (768→256×2→1, SCReLU)
-    **embedded in the binary** (`tools/embed_net.py`); incremental AVX2 accumulator
-    on `Position`, bullet `.bin` format. **It BEATS the HCE: +108 Elo at fixed
-    nodes** (13.4M-position net). SIMD-optimized (Lizard SCReLU) so it's also
-    competitive at wall-clock. Full plan + history: **[docs/NNUE.md](docs/NNUE.md)**.
+  Pick via UCI `Eval` option or the GUI "Evaluation" menu.
+  - **NNUE is the DEFAULT** (loaded at startup via `nnue::load_embedded()`). It's a
+    `(768→256)x2→1` SCReLU net trained with `bullet` on **public Leela/SF data**
+    (ODbL, clean licence), embedded in the binary (`tools/embed_net.py`), with an
+    incremental **AVX2** accumulator (Lizard SCReLU). **It beats the HCE by ~+237
+    Elo at 8+0.08** (and ~+350 at fixed nodes). The public-data net crushed our own
+    13.4M self-play net by +240 — data quality/volume was the lever.
   - **HCE** (hand-crafted: material + PeSTO PSQT + safe mobility + bishop pair +
-    rook files + pawn structure) — the **current startup default** and a kept,
-    selectable option (the project's classical-eval study; do not delete).
-  - Default is still HCE pending a clean wall-clock SPRT win; flip to NNUE
-    (load embedded net at startup) once confirmed. See docs/NNUE.md.
+    rook files + pawn structure) — kept as a selectable option (the project's
+    classical-eval study; do not delete), now the secondary eval.
+  - Full story + how to retrain/scale: **[docs/NNUE.md](docs/NNUE.md)**.
   - Tried-and-reverted classical eval terms (king safety, passed pawns) were SPRT
     neutral/negative — don't re-add without tuning + SPRT. Search-heuristic tweaks
     (improving/continuation-history/history-LMR) also regressed and were reverted.
@@ -74,7 +81,7 @@ Where the engine is *today* (so a new session can pick up TODOs without re-deriv
 - `chess_gui` = Qt app, separate process.
 - Module map: `core/` (bitboards, board, zobrist), `movegen/` (magics, legal
   moves, make/unmake), `search/` (alpha-beta/PVS, TT, ordering, quiescence),
-  `eval/` (HCE now, NNUE later), `uci/`.
+  `eval/` (HCE + NNUE, switchable), `uci/`.
 
 ## Build / test
 - **Toolchain (installed via MSYS2):** GCC + CMake + Ninja + Qt6 live in

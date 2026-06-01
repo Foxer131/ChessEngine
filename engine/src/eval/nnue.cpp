@@ -30,6 +30,7 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <random>
 #include <vector>
 
 namespace chess {
@@ -72,6 +73,8 @@ bool read_vec(std::ifstream& f, std::vector<T>& v, std::size_t n) {
 } // namespace
 
 bool is_loaded() { return g_loaded; }
+
+void unload() { g_loaded = false; }
 
 bool load(const std::string& path) {
     g_loaded = false;
@@ -153,6 +156,51 @@ int forward(const Accumulator& acc, Color stm) {
     std::int32_t out = g_net.outB;
     for (int i = 0; i < H2; ++i) out += std::int32_t(g_net.outW[i]) * a2[i];
     return out / OUT_SCALE;   // dequantize to centipawns
+}
+
+// ---- Incremental updates ----------------------------------------------------
+void add_piece(Accumulator& acc, Color c, PieceType pt, Square sq) {
+    for (Color p = WHITE; p <= BLACK; p = Color(p + 1)) {
+        const std::int16_t* col = &g_net.ftW[std::size_t(feature_index(p, c, pt, sq)) * L1];
+        for (int i = 0; i < L1; ++i) acc.v[p][i] = std::int16_t(acc.v[p][i] + col[i]);
+    }
+}
+
+void remove_piece(Accumulator& acc, Color c, PieceType pt, Square sq) {
+    for (Color p = WHITE; p <= BLACK; p = Color(p + 1)) {
+        const std::int16_t* col = &g_net.ftW[std::size_t(feature_index(p, c, pt, sq)) * L1];
+        for (int i = 0; i < L1; ++i) acc.v[p][i] = std::int16_t(acc.v[p][i] - col[i]);
+    }
+}
+
+bool accumulator_matches_refresh(const Accumulator& acc, const Position& pos) {
+    Accumulator ref;
+    refresh(ref, pos);
+    for (Color p = WHITE; p <= BLACK; p = Color(p + 1))
+        for (int i = 0; i < L1; ++i)
+            if (acc.v[p][i] != ref.v[p][i]) return false;
+    return true;
+}
+
+void make_random_net(unsigned seed) {
+    std::mt19937 rng(seed);
+    auto i16 = [&](int lo, int hi) {
+        return std::int16_t(std::uniform_int_distribution<int>(lo, hi)(rng));
+    };
+    auto i8  = [&](int lo, int hi) {
+        return std::int8_t(std::uniform_int_distribution<int>(lo, hi)(rng));
+    };
+    Network n;
+    n.ftW.resize(std::size_t(INPUT_DIM) * L1); for (auto& w : n.ftW) w = i16(-8, 8);
+    n.ftB.resize(L1);                          for (auto& w : n.ftB) w = i16(-16, 16);
+    n.h1W.resize(std::size_t(2 * L1) * H1);    for (auto& w : n.h1W) w = i8(-4, 4);
+    n.h1B.resize(H1);                          for (auto& w : n.h1B) w = std::uniform_int_distribution<int>(-64, 64)(rng);
+    n.h2W.resize(std::size_t(H1) * H2);        for (auto& w : n.h2W) w = i8(-4, 4);
+    n.h2B.resize(H2);                          for (auto& w : n.h2B) w = std::uniform_int_distribution<int>(-64, 64)(rng);
+    n.outW.resize(H2);                         for (auto& w : n.outW) w = i8(-8, 8);
+    n.outB = std::uniform_int_distribution<int>(-64, 64)(rng);
+    g_net = std::move(n);
+    g_loaded = true;
 }
 
 } // namespace nnue

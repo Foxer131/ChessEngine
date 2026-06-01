@@ -58,6 +58,7 @@ struct Accumulator {
 // Wire to a UCI `EvalFile` option. While unloaded, evaluate() must fall back to HCE.
 bool load(const std::string& path);
 bool is_loaded();
+void unload();   // drop the loaded net (evaluate() falls back to HCE)
 
 // Recompute the accumulator from scratch for `pos` (the from-scratch reference,
 // and the Phase-2 correctness gate: incremental updates must always equal this).
@@ -67,11 +68,22 @@ void refresh(Accumulator& acc, const Position& pos);
 // centipawns from `stm`'s perspective (same convention as the HCE evaluate()).
 int forward(const Accumulator& acc, Color stm);
 
-// TODO(Phase 2): incremental hooks called from make/unmake, e.g.
-//   void add_piece(Accumulator&, Color, PieceType, Square);
-//   void remove_piece(Accumulator&, Color, PieceType, Square);
-// plus a debug `bool accumulator_matches_refresh(const Accumulator&, const Position&)`
-// to verify incremental == refresh across a perft walk before trusting it.
+// ---- Incremental updates (Phase 2) ------------------------------------------
+// Called from Position::put_piece / remove_piece so the accumulator tracks the
+// board exactly, the way the Zobrist key does. Each adds/subtracts one feature's
+// column for both perspectives - a handful of int16 adds, no matmul. Because
+// make/unmake call put/remove symmetrically, the updates auto-revert on unmake.
+// Safe to call only on a `valid` accumulator with a loaded net.
+void add_piece(Accumulator& acc, Color c, PieceType pt, Square sq);
+void remove_piece(Accumulator& acc, Color c, PieceType pt, Square sq);
+
+// Debug correctness gate: does the (incrementally maintained) accumulator equal a
+// from-scratch refresh of the same position? Must hold after every make/unmake.
+bool accumulator_matches_refresh(const Accumulator& acc, const Position& pos);
+
+// Test/bootstrap helper: install a small deterministic in-memory network (so the
+// incremental==refresh gate can run without a trained net file). Not for play.
+void make_random_net(unsigned seed);
 
 } // namespace nnue
 } // namespace chess

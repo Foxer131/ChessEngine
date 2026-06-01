@@ -243,11 +243,8 @@ int evaluate(const Position& pos) {
     // NNUE when a net is loaded, else the hand-crafted baseline. Phase 1 does a
     // from-scratch accumulator refresh per call (correct, not yet fast); Phase 2
     // makes the accumulator incremental on Position. Same swappable interface.
-    if (nnue::is_loaded()) {
-        nnue::Accumulator acc;
-        nnue::refresh(acc, pos);
-        return nnue::forward(acc, pos.side_to_move());
-    }
+    if (nnue::is_loaded())
+        return nnue::forward(pos.accumulator(), pos.side_to_move());  // incremental, lazy-refreshed
     return evaluate_hce(pos);
 }
 

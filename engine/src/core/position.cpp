@@ -96,6 +96,11 @@ void Position::put_piece(Piece pc, Square s) {
     set(byColor_[color_of(pc)], s);
     set(byType_[type_of(pc)], s);
     key_ ^= Z.piece[pc][s];
+    // Keep the NNUE accumulator in sync IF it is already valid (like the key).
+    // If invalid (fresh board / FEN rebuild / no net), leave it - it refreshes
+    // lazily on first use, so bulk edits and the HCE path cost nothing here.
+    if (acc_.valid && nnue::is_loaded())
+        nnue::add_piece(acc_, color_of(pc), type_of(pc), s);
 }
 
 void Position::remove_piece(Square s) {
@@ -104,6 +109,8 @@ void Position::remove_piece(Square s) {
     clear(byColor_[color_of(pc)], s);
     clear(byType_[type_of(pc)], s);
     board_[s] = NO_PIECE;
+    if (acc_.valid && nnue::is_loaded())
+        nnue::remove_piece(acc_, color_of(pc), type_of(pc), s);
 }
 
 // -----------------------------------------------------------------------------

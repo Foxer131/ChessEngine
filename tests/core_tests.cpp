@@ -3,6 +3,7 @@
 // Release build's NDEBUG would strip out). Returns non-zero if anything failed,
 // so CTest treats a failure as a failing test.
 
+#include <functional>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -317,6 +318,33 @@ int main() {
         CHECK(perft(pf, 2) == 191);
         CHECK(perft(pf, 3) == 2812);
         CHECK(perft(pf, 4) == 43238);
+    }
+
+    // ---- NNUE incremental accumulator: the correctness gate ----
+    // With a (random) net installed, the incrementally-maintained accumulator must
+    // equal a from-scratch refresh at every node, AND be restored exactly after
+    // unmake. Walk the move tree to a small depth verifying both.
+    {
+        nnue::make_random_net(12345);
+        std::function<void(Position&, int)> walk = [&](Position& pos, int depth) {
+            // Touch the accumulator (lazy refresh if needed) and check it matches.
+            CHECK(nnue::accumulator_matches_refresh(pos.accumulator(), pos));
+            if (depth == 0) return;
+            MoveList ml; generate_legal(pos, ml);
+            for (Move m : ml) {
+                Position::Undo u;
+                pos.make_move(m, u);
+                CHECK(nnue::accumulator_matches_refresh(pos.accumulator(), pos)); // incremental after make
+                walk(pos, depth - 1);
+                pos.unmake_move(m, u);
+                CHECK(nnue::accumulator_matches_refresh(pos.accumulator(), pos)); // restored after unmake
+            }
+        };
+        Position pf; pf.set_startpos();
+        walk(pf, 3);
+        Position kp; kp.set_fen("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1");
+        walk(kp, 2);   // castling / ep / promotions exercise more put/remove paths
+        nnue::unload();   // back to HCE so the eval checks below are unaffected
     }
 
     // ---- evaluation ----

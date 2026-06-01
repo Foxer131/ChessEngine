@@ -20,6 +20,7 @@
 #include "chess/types.hpp"
 #include "chess/bitboard.hpp"
 #include "chess/move.hpp"
+#include "chess/nnue.hpp"
 
 namespace chess {
 
@@ -101,6 +102,16 @@ public:
     void put_piece(Piece pc, Square s);   // place pc on s (s must be empty)
     void remove_piece(Square s);          // remove whatever is on s
 
+    // ---- NNUE accumulator (per-position hidden state) ----
+    // Maintained incrementally by put_piece/remove_piece (like the Zobrist key)
+    // while it is valid. Lazily refreshed here on first use, then it rides along
+    // through make/unmake and auto-reverts. Only meaningful when an NNUE net is
+    // loaded; the HCE path never touches it.
+    const nnue::Accumulator& accumulator() const {
+        if (!acc_.valid) nnue::refresh(acc_, *this);
+        return acc_;
+    }
+
     // ---- debug / serialization (provided in position.cpp) ----
     std::string to_string() const;        // ASCII board, rank 8 on top
     std::string to_fen() const;           // the position as a 6-field FEN string
@@ -115,6 +126,10 @@ private:
     int      halfmoveClock_          = 0;
     int      fullmoveNumber_         = 1;
     std::uint64_t key_               = 0;   // zobrist hash; see key()
+
+    // NNUE accumulator. `mutable` so the const accessor can lazily refresh it.
+    // Default-constructed as invalid (valid=false) => refreshed on first use.
+    mutable nnue::Accumulator acc_;
 };
 
 }

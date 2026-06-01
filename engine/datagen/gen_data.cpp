@@ -124,8 +124,11 @@ int main(int argc, char** argv) {
     for (int g = 0; g < games; ++g) {
         std::vector<std::pair<std::string,int>> lines;
         double result = play_game(rng, nodes, lines);
+        // Result as "1.0"/"0.5"/"0.0" (White-relative) - the form bullet's text
+        // loader expects.
+        const char* res = (result == 1.0) ? "1.0" : (result == 0.0) ? "0.0" : "0.5";
         for (auto& [fen, cp] : lines)
-            f << fen << " | " << cp << " | " << result << "\n";
+            f << fen << " | " << cp << " | " << res << "\n";
         totalPositions += lines.size();
         tt_clear();   // independent games: don't leak TT knowledge across them
 

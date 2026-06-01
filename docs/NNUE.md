@@ -5,8 +5,47 @@ This is the plan for replacing the hand-crafted evaluation (HCE) with an **NNUE*
 available to a classical alpha-beta engine: plausibly **+300–600 Elo** over our
 HCE. Read `CLAUDE.md` first (build path gotcha, "user codes along", SPRT harness).
 
-> Status: **Phase 0 done** (this doc + scaffold in `engine/include/chess/nnue.hpp`).
-> The branch is `experiment/nnue`. Pick up at Phase 1.
+> Status: **Phases 0-2 done + first net trained** (branch `experiment/nnue`).
+> Inference, incremental accumulator, bullet training pipeline all work. The first
+> net (355k positions) LOST to the HCE; diagnosis below. Pick up at "re-train with
+> more data".
+
+## Hard-won lessons (read before touching NNUE again)
+
+1. **Architecture matches `bullet`'s `simple.rs` exactly** so we load its raw
+   quantised `.bin` with no exporter: `(768->256)x2->1`, **SCReLU**, `QA=255`,
+   `QB=64`, `SCALE=400`. `nnue.cpp` reads `[ftW, ftB, outW, outB]` (all i16) and
+   ignores bullet's 64-byte trailing pad. Our `feature_index` already equals
+   bullet's `Chess768` mapping (own/enemy bucket, black mirrors `sq^56`).
+
+2. **The mechanics are correct and verified** - do not re-debug these:
+   - eval sign is side-to-move-relative (checked KQvK and full-board, both stms);
+   - the incremental accumulator equals a from-scratch refresh across a 120-ply
+     game AND across null moves (verified with a scratch tool);
+   - material is learned (a side up a queen reads ~+2000cp, symmetric).
+
+3. **355k positions is far too little.** The first net opened fine but chose weak
+   positional moves in balanced middlegames and got mated (SPRT: 1.5%, -720 Elo).
+   The eval was *honest* (its score fell as it worsened) - it just hadn't learned
+   nuance. The fix is DATA, not code. Target millions (this run: ~4.8M).
+
+4. **Validate by PLAYING, not by eyeballing static eval.** Material/symmetry spot
+   checks all passed on the losing net; only real games (the SPRT) exposed it.
+   When testing the next net, also run a few games and watch a PGN, not just evals.
+
+5. **NNUE inference is ~3x slower than HCE** (scalar 256-wide forward). For a fair
+   "did more data help?" verdict, run the SPRT at **fixed nodes/depth** (e.g.
+   `option.Nodes` or a depth limit) so net *quality* is isolated from inference
+   *speed*. SIMD-ing `forward()` (AVX2 over the i16 accumulator) is the perf fix,
+   but it's a later, carefully-verified step - a wrong SIMD pass silently corrupts
+   eval, the exact bug class that cost an hour here.
+
+## Re-train workflow (data already generated)
+
+`powershell -File tools\training\retrain.ps1` does: normalize -> convert to
+bulletformat -> train (bullet+CUDA, ~seconds on the GPU). Then copy the newest
+`checkpoints\chessengine-*\quantised.bin` to `C:\chess_sprt\data\net.nnue` and
+SPRT vs HCE (ideally fixed-nodes; see lesson 5).
 
 ## Why NNUE, and the paradigm note
 

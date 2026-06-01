@@ -56,6 +56,33 @@ Bitboard compute_pawn(Color c, Square s) {
                         : (south_east(b) | south_west(b));
 }
 
+// between/line geometry, computed directly from file/rank deltas (no dependency
+// on the magic tables, so init order doesn't matter). If a and b are colinear
+// (same rank, file, or diagonal), `between` walks the squares strictly between
+// them and `line` is `between | a | b | the two squares just beyond` extended to
+// the full board line. We build `line` by walking both directions to the edges.
+void compute_between_line(Square a, Square b, Bitboard& between, Bitboard& line) {
+    between = 0; line = 0;
+    const int fa = file_of(a), ra = rank_of(a);
+    const int fb = file_of(b), rb = rank_of(b);
+    const int df = fb - fa, dr = rb - ra;
+    if (a == b) return;
+    // Colinear iff same file (df==0), same rank (dr==0), or diagonal (|df|==|dr|).
+    const bool colinear = (df == 0) || (dr == 0) || (df == dr) || (df == -dr);
+    if (!colinear) return;
+
+    const int sf = (df > 0) - (df < 0);   // step direction in file: -1/0/+1
+    const int sr = (dr > 0) - (dr < 0);   // step direction in rank
+
+    // between: from a+step up to (not including) b.
+    for (int f = fa + sf, r = ra + sr; f != fb || r != rb; f += sf, r += sr)
+        set(between, make_square(File(f), Rank(r)));
+
+    // line: walk both directions from a to the board edges (includes a and b).
+    for (int f = fa, r = ra; on_board(f, r); f += sf, r += sr) set(line, make_square(File(f), Rank(r)));
+    for (int f = fa, r = ra; on_board(f, r); f -= sf, r -= sr) set(line, make_square(File(f), Rank(r)));
+}
+
 // -----------------------------------------------------------------------------
 // Table storage + one-time fill (provided). The Meyers singleton initializes on
 // first access, so callers never need an explicit init step.
@@ -64,15 +91,20 @@ struct Tables {
     Bitboard knight[SQUARE_NB]{};
     Bitboard king[SQUARE_NB]{};
     Bitboard pawn[COLOR_NB][SQUARE_NB]{};
+    Bitboard between[SQUARE_NB][SQUARE_NB]{};
+    Bitboard line[SQUARE_NB][SQUARE_NB]{};
 
     Tables() {
-        
+
         for (Square s = SQ_A1; s <= SQ_H8; s = Square(s + 1)) {
             knight[s]      = compute_knight(s);
             king[s]        = compute_king(s);
             pawn[WHITE][s] = compute_pawn(WHITE, s);
             pawn[BLACK][s] = compute_pawn(BLACK, s);
         }
+        for (Square a = SQ_A1; a <= SQ_H8; a = Square(a + 1))
+            for (Square b = SQ_A1; b <= SQ_H8; b = Square(b + 1))
+                compute_between_line(a, b, between[a][b], line[a][b]);
     }
 };
 
@@ -91,8 +123,11 @@ Bitboard king_attacks(Square s) {
     return tables().king[s]; 
 }
 
-Bitboard pawn_attacks(Color c, Square s) { 
-    return tables().pawn[c][s]; 
+Bitboard pawn_attacks(Color c, Square s) {
+    return tables().pawn[c][s];
 }
+
+Bitboard between_bb(Square a, Square b) { return tables().between[a][b]; }
+Bitboard line_bb(Square a, Square b)    { return tables().line[a][b]; }
 
 } // namespace chess

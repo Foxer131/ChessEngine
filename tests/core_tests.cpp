@@ -295,6 +295,22 @@ int main() {
         CHECK(a.key() == b.key());
     }
 
+    // ---- between_bb / line_bb (for legal movegen) ----
+    {
+        // a1..a8: between(a1,a4) = a2,a3; line(a1,a4) = whole a-file.
+        CHECK(between_bb(SQ_A1, SQ_A4) == (square_bb(SQ_A2) | square_bb(SQ_A3)));
+        CHECK(between_bb(SQ_A1, SQ_A2) == 0);                         // adjacent: nothing between
+        CHECK((line_bb(SQ_A1, SQ_A4) & square_bb(SQ_A8)) != 0);       // a8 is on the a-file line
+        CHECK((line_bb(SQ_A1, SQ_A4) & square_bb(SQ_B1)) == 0);       // b1 is not
+        // diagonal a1..h8: between(c1? ) use the long diagonal.
+        CHECK(between_bb(SQ_A1, SQ_D4) == (square_bb(SQ_B2) | square_bb(SQ_C3)));
+        CHECK((line_bb(SQ_A1, SQ_C3) & square_bb(SQ_H8)) != 0);       // same diagonal
+        // non-colinear -> empty.
+        CHECK(between_bb(SQ_A1, SQ_B3) == 0);
+        CHECK(line_bb(SQ_A1, SQ_B3) == 0);
+        CHECK(between_bb(SQ_E1, SQ_E1) == 0);                         // same square
+    }
+
     // ---- perft: the move-generation correctness gate ----
     {   // standard start position (reference values from the chess programming wiki)
         Position pf; pf.set_startpos();

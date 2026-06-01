@@ -24,4 +24,12 @@ Bitboard bishop_attacks(Square s, Bitboard occupied);
 Bitboard rook_attacks(Square s, Bitboard occupied);
 Bitboard queen_attacks(Square s, Bitboard occupied);
 
+// For legal move generation. If a and b share a rank/file/diagonal:
+//   between_bb(a,b) = the squares strictly between them (empty otherwise).
+//   line_bb(a,b)    = the whole line through them (the full rank/file/diagonal).
+// Used to find check-blocking squares and to restrict a pinned piece to its pin
+// ray. Precomputed 64x64 tables.
+Bitboard between_bb(Square a, Square b);
+Bitboard line_bb(Square a, Square b);
+
 } // namespace chess

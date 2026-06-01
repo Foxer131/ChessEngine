@@ -21,6 +21,7 @@
 #include "chess/movelist.hpp"
 #include "chess/search.hpp"
 #include "chess/book.hpp"
+#include "chess/nnue.hpp"
 
 using namespace chess;
 
@@ -170,6 +171,7 @@ int main() {
             std::cout << "option name OwnBook type check default true\n";
             std::cout << "option name Threads type spin default 1 min 1 max 256\n";
             std::cout << "option name Hash type spin default 16 min 1 max 4096\n";
+            std::cout << "option name EvalFile type string default <none>\n";
             std::cout << "uciok\n" << std::flush;
         } else if (cmd == "isready") {
             std::lock_guard<std::mutex> lk(g_cout);
@@ -178,11 +180,17 @@ int main() {
             std::string tok, name, value;
             while (is >> tok) {
                 if      (tok == "name")  is >> name;
-                else if (tok == "value") is >> value;
+                else if (tok == "value") { std::getline(is, value); // rest of line (paths may have spaces)
+                                           if (!value.empty() && value[0] == ' ') value.erase(0, 1); }
             }
             if      (name == "OwnBook") g_own_book = (value == "true");
             else if (name == "Threads") g_threads = std::max(1, std::atoi(value.c_str()));
             else if (name == "Hash")    tt_resize(std::atoi(value.c_str()));
+            else if (name == "EvalFile") {
+                bool ok = nnue::load(value);
+                std::lock_guard<std::mutex> lk(g_cout);
+                std::cout << "info string EvalFile " << (ok ? "loaded: " : "FAILED: ") << value << "\n" << std::flush;
+            }
         } else if (cmd == "ucinewgame") {
             stop_and_join();
             tt_clear();

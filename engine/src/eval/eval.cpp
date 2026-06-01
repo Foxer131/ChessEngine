@@ -1,6 +1,7 @@
 #include "chess/eval.hpp"
 #include "chess/bitboard.hpp"
 #include "chess/attacks.hpp"
+#include "chess/nnue.hpp"
 
 #include <algorithm>
 
@@ -176,7 +177,8 @@ Bitboard piece_attacks(PieceType pt, Square s, Bitboard occ) {
 
 } // namespace
 
-int evaluate(const Position& pos) {
+// Hand-crafted evaluation (the baseline). Used when no NNUE net is loaded.
+int evaluate_hce(const Position& pos) {
     const Bitboard occ = pos.pieces();
     int mg = 0, eg = 0, phase = 0;   // mg/eg accumulate from White's perspective
 
@@ -235,6 +237,18 @@ int evaluate(const Position& pos) {
     phase = std::min(phase, PHASE_MAX);
     int score = (mg * phase + eg * (PHASE_MAX - phase)) / PHASE_MAX;
     return (pos.side_to_move() == WHITE) ? score : -score;
+}
+
+int evaluate(const Position& pos) {
+    // NNUE when a net is loaded, else the hand-crafted baseline. Phase 1 does a
+    // from-scratch accumulator refresh per call (correct, not yet fast); Phase 2
+    // makes the accumulator incremental on Position. Same swappable interface.
+    if (nnue::is_loaded()) {
+        nnue::Accumulator acc;
+        nnue::refresh(acc, pos);
+        return nnue::forward(acc, pos.side_to_move());
+    }
+    return evaluate_hce(pos);
 }
 
 } // namespace chess

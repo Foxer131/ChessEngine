@@ -25,6 +25,7 @@ compile_commands.json
 # source like nnue.hpp - keep trained nets under nets/ or name them *.nnue.bin.
 nets/
 *.nnue.bin
+*.nnue
 
 # SPRT harness: built engine binaries + match output (openings book stays tracked)
 /tools/bin/

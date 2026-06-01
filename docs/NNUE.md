@@ -108,11 +108,34 @@ Keep a `nnue::load(path)` and a UCI `EvalFile` option (default: HCE if absent).
 - **Loss:** blend of (search eval) and (game result), the standard NNUE recipe.
 - Training is GPU and offline; the produced `.nnue` is what the engine loads.
 
+## Pretrained net vs train-our-own (decision)
+
+Three options, and why we picked one:
+
+1. **Reuse a Stockfish net** — they are **GPLv3**, so embedding one relicenses our
+   whole engine as GPL. Also not plug-and-play: their topology (HalfKAv2_hm, sizes,
+   quantization) is specific, so we'd have to match our inference to *their* format
+   byte-for-byte. Rejected (licence + coupling).
+2. **Reuse a permissively-licensed net** (MIT/Apache, smaller projects) — licence is
+   fine, but these are almost always a *different topology*, so "use it" really means
+   "implement that architecture's inference and load its weights". Not free.
+3. **Train our own** — clean licence, and the net matches our own feature scheme.
+   Cheap: self-play data + `bullet` on a modest GPU trains a small net in hours.
+
+**Decision: train our own (option 3), and define our OWN file format** (do not parse
+SF's `.nnue`). This keeps Phase 1 simple and the licence clean. The inference code is
+the same regardless of where weights come from, so this choice only affects training.
+
+Bootstrap shortcut for the *first* net: label positions with **our current HCE +
+shallow search** (distill what we already have) before moving to real self-play
+labels. Gets a working net fast, then iterate.
+
 ## License
 
 Stockfish nets and code are **GPLv3** — copying a net or NNUE code relicenses our
-engine GPL. To stay permissive: **train our own net** (clean-room), and write our
-own inference. The *concepts* here are not encumbered; specific SF weights are.
+engine GPL. To stay permissive: **train our own net** (clean-room, see decision
+above), and write our own inference. The *concepts* here are not encumbered; specific
+SF weights are.
 
 ## Phased checklist
 

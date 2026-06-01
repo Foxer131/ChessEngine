@@ -78,10 +78,9 @@ bool load(const std::string& path) {
     if (!read_vec(f, n.outW, std::size_t(2) * L1))         return false;
     f.read(reinterpret_cast<char*>(&n.outB), sizeof(std::int16_t));
     if (!f) return false;
-
-    // Reject if the file is larger than expected (wrong L1 / wrong file).
-    f.peek();
-    if (!f.eof()) return false;
+    // Trailing bytes are allowed: bullet pads the quantised .bin to a 64-byte
+    // boundary (the scalar output bias rounds up from 2 to 64 bytes). We've read
+    // exactly the four arrays we need; ignore any padding after them.
 
     g_net = std::move(n);
     g_loaded = true;

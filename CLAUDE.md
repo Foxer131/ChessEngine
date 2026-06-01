@@ -8,6 +8,41 @@ separate process that drives it over UCI. CPU-only — see the GPU note below.
 **Next steps / open work: see [docs/TODO.md](docs/TODO.md)** (prioritized, with
 implementation notes). docs/ROADMAP.md is the original build order.
 
+## Current state & how to get productive fast (read this first)
+Where the engine is *today* (so a new session can pick up TODOs without re-deriving it):
+
+- **Strength & search:** working alpha-beta/PVS engine (TT, iterative deepening,
+  aspiration, quiescence+SEE, killers/history/counter-moves, null-move, RFP,
+  futility, LMP, LMR, check extensions). **Lazy SMP multithreading is done**
+  (UCI `Threads`; SPRT-measured **+127 Elo** 8-vs-1 thread). Architecture: search
+  lives in `engine/src/search/search.cpp` as a `Worker` (all per-thread state) +
+  a shared lockless `TranspositionTable`, injected via `SharedState`
+  (dependency injection). **Add new search heuristics as `Worker` fields** — you
+  then never reason about threads. Threads=1 must stay bit-identical.
+- **Evaluation — the engine has BOTH, uses ONE at a time (a runtime switch):**
+  `evaluate()` in `engine/src/eval/eval.cpp` does `if (nnue::is_loaded()) NNUE else HCE`.
+  - **HCE** (hand-crafted: material + PeSTO PSQT + safe mobility + bishop pair +
+    rook files + pawn structure) is the **default and currently the stronger**.
+  - **NNUE** (`engine/src/eval/nnue.cpp`) is fully wired (loads via UCI `EvalFile`,
+    incremental accumulator on `Position`, matches the `bullet` trainer's format).
+    Trained nets so far still lose to HCE (best: −99 Elo at 5M training positions),
+    so NNUE is **opt-in** until a net wins an SPRT. Full plan: **[docs/NNUE.md](docs/NNUE.md)**.
+  - Tried-and-reverted classical eval terms (king safety, passed pawns) were SPRT
+    neutral/negative — don't re-add without tuning + SPRT. Search-heuristic tweaks
+    (improving/continuation-history/history-LMR) also regressed and were reverted.
+- **Measuring strength is mandatory and easy:** the **SPRT harness** is built and
+  proven (`tools/` + `tools/training/sprt_nnue.ps1`). It uses **fastchess**
+  (`C:\tools\fastchess\...`) and stages binaries under an ASCII path. **Never trust
+  a strength change without an SPRT** — several "obvious" wins this project tried
+  were actually neutral/negative. Use fixed-nodes SPRT to compare evals fairly
+  (NNUE is ~3× slower than HCE, so wall-clock conflates quality with speed).
+- **Branching:** risky/experimental work goes on its own branch (`experiment/*`),
+  commit in small revertible steps, SPRT before merging to `main`. NNUE work is on
+  `experiment/nnue`.
+- **External (not in the repo):** training lives in `C:\chess_nnue\bullet`
+  (the `bullet` trainer + our `examples/chessengine.rs`); datasets/nets under
+  `C:\chess_sprt\data`. `gen_data` (self-play) is the data source.
+
 ## Decisions already made (don't re-litigate without the user)
 - **Paradigm:** classical alpha-beta + bitboards (Stockfish-style), CPU.
   NOT neural-MCTS. NNUE eval is a possible *later* addition (still CPU/int16).

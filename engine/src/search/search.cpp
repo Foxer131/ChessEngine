@@ -411,9 +411,9 @@ struct Worker {
             // verified form of "go deeper on the one promising move".
             int extension = 0;
             if (!root && !inCheck && m == ttMove && excludedMove == MOVE_NONE
-                && depth >= 8 && ttDepth >= depth - 3 && ttBound != BOUND_UPPER
+                && depth >= 10 && ttDepth >= depth - 3 && ttBound != BOUND_UPPER
                 && std::abs(ttScore) < MATE_IN_MAX) {
-                const int singularBeta  = ttScore - 2 * depth;
+                const int singularBeta  = ttScore - 3 * depth;
                 const int singularDepth = (depth - 1) / 2;
                 int s = negamax(singularDepth, singularBeta - 1, singularBeta,
                                 ply, prevMove, /*excludedMove=*/ttMove);

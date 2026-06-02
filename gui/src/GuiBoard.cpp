@@ -90,6 +90,20 @@ bool GuiBoard::inCheck() const {
     return pos_.in_check();
 }
 
+QVector<QPoint> GuiBoard::legalDestinations(int fromFile, int fromRank) const {
+    QVector<QPoint> dests;
+    const chess::Square from = sq(fromFile, fromRank);
+    chess::MoveList legal;
+    chess::generate_legal(const_cast<chess::Position&>(pos_), legal);
+    for (chess::Move m : legal) {
+        if (m.from_sq() != from) continue;
+        const chess::Square to = m.to_sq();
+        const QPoint pt(chess::file_of(to), chess::rank_of(to));
+        if (!dests.contains(pt)) dests.append(pt);   // promotions repeat the to-square
+    }
+    return dests;
+}
+
 QString GuiBoard::toUci(int fromFile, int fromRank, int toFile, int toRank, QChar promo) {
     auto s = [](int f, int r) {
         return QString(QChar('a' + f)) + QChar('1' + r);

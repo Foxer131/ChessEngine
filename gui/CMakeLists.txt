@@ -8,9 +8,10 @@
 # =============================================================================
 
 # Qt6 is preferred; fall back to Qt5 if that's what's installed.
-find_package(Qt6 COMPONENTS Widgets QUIET)
+# Svg is needed to render the SVG piece set via QSvgRenderer.
+find_package(Qt6 COMPONENTS Widgets Svg QUIET)
 if(NOT Qt6_FOUND)
-    find_package(Qt5 COMPONENTS Widgets QUIET)
+    find_package(Qt5 COMPONENTS Widgets Svg QUIET)
 endif()
 
 if(NOT Qt6_FOUND AND NOT Qt5_FOUND)
@@ -30,11 +31,12 @@ add_executable(chess_gui
     src/BoardWidget.cpp
     src/NewGameDialog.cpp
     src/UciEngine.cpp
-    src/GuiBoard.cpp)
+    src/GuiBoard.cpp
+    resources/pieces/pieces.qrc)   # AUTORCC compiles the SVG piece set in
 
-# Qt::Widgets for the UI; chess_core for the (perft-validated) rules + legality.
-# The engine's *thinking* still runs in a separate process over UCI.
-target_link_libraries(chess_gui PRIVATE Qt::Widgets chess_core)
+# Qt::Widgets for the UI; Qt::Svg for the piece sprites; chess_core for the
+# (perft-validated) rules + legality. The engine's *thinking* runs separately.
+target_link_libraries(chess_gui PRIVATE Qt::Widgets Qt::Svg chess_core)
 
 # On Windows, mark as a GUI app (no console window) in Release.
 if(WIN32)

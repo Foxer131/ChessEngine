@@ -11,6 +11,8 @@
 
 #include <QChar>
 #include <QString>
+#include <QVector>
+#include <QPoint>
 #include "chess/position.hpp"
 
 class GuiBoard {
@@ -40,6 +42,11 @@ public:
 
     // Does (file,rank) hold a piece of the side to move?
     bool isOwnPiece(int file, int rank) const;
+
+    // Legal destination squares for the piece on (fromFile,fromRank), as
+    // (file,rank) points. Empty if the square holds no piece or no legal move
+    // leaves it. Used by the GUI to highlight where a selected piece can go.
+    QVector<QPoint> legalDestinations(int fromFile, int fromRank) const;
 
     // True if a pawn on (file,rank) moving to (toFile,toRank) reaches promotion.
     bool isPromotion(int fromFile, int fromRank, int toFile, int toRank) const;

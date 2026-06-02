@@ -126,8 +126,16 @@ a gorgeous drawn game vs the Magnus bot) have been wrong here repeatedly.
 ## GUI (Qt)
 - [x] **Mate/stalemate detection** + **Evaluation menu** (HCE/NNUE) + **new-game
       freeze fixed** (game-id instead of a discard counter) — all done.
-- [ ] **Highlight legal moves** when a piece is selected (query via chess_core
-      `generate_legal`, which the GUI already links).
+- [x] **SVG piece sprites — DONE**. Replaced the Unicode-glyph rendering with the
+      **cburnett** SVG set (open BSD/GPL/GFDL licence, used under BSD — see
+      `gui/resources/pieces/CREDITS.md`; NOT chess.com's proprietary art).
+      Rendered via `QSvgRenderer` (cached per piece), embedded with a `.qrc`
+      (AUTORCC). Needs the **`mingw-w64-x86_64-qt6-svg`** module (now a build dep;
+      `find_package(Qt6 COMPONENTS Widgets Svg)`). Glyph rendering kept as a
+      fallback if a sprite is missing.
+- [x] **Highlight legal moves — DONE**. `GuiBoard::legalDestinations(file,rank)`
+      (filters `generate_legal`); `BoardWidget` paints a centred dot on empty
+      targets and a ring on captures for the selected piece.
 - [ ] Move list / PGN pane, a clock, board-flip toggle, takeback/undo,
       load/save FEN & PGN, a result banner.
 - [ ] Show engine score/PV more richly (currently a raw `info` line in the log).

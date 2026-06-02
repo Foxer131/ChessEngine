@@ -93,7 +93,9 @@ Where the engine is *today* (so a new session can pick up TODOs without re-deriv
 ## Build / test
 - **Toolchain (installed via MSYS2):** GCC + CMake + Ninja + Qt6 live in
   `C:\msys64\mingw64\bin`. Prepend that to `PATH` before building:
-  `$env:Path = "C:\msys64\mingw64\bin;" + $env:Path`.
+  `$env:Path = "C:\msys64\mingw64\bin;" + $env:Path`. The GUI also needs the
+  **`mingw-w64-x86_64-qt6-svg`** module (for `QSvgRenderer` piece sprites) —
+  `pacman -S mingw-w64-x86_64-qt6-svg` if a fresh box is missing it.
 - **CRITICAL — build in an ASCII-only path.** The source tree lives under
   `...\João\...` (accented char) + OneDrive. Qt's `moc` cannot *create* files
   under non-ASCII paths, so configure the build dir OUTSIDE the source tree:

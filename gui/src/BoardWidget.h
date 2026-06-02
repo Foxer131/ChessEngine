@@ -7,7 +7,12 @@
 // =============================================================================
 
 #include <QWidget>
+#include <QHash>
+#include <QVector>
+#include <QPoint>
 #include "GuiBoard.h"
+
+class QSvgRenderer;
 
 class BoardWidget : public QWidget {
     Q_OBJECT
@@ -32,10 +37,16 @@ protected:
     void mousePressEvent(QMouseEvent*) override;
 
 private:
-    void clearSelection() { selFile_ = selRank_ = -1; }
+    void clearSelection() { selFile_ = selRank_ = -1; legalDests_.clear(); }
     // Convert a pixel point to a board square (accounts for orientation).
     bool pointToSquare(const QPoint& p, int& file, int& rank) const;
     QRect squareRect(int file, int rank) const;
+    // Lazily-created, cached SVG renderer for a FEN piece char (nullptr if the
+    // sprite is missing — caller falls back to the Unicode glyph).
+    QSvgRenderer* rendererFor(char piece);
+
+    QHash<char, QSvgRenderer*> renderers_;
+    QVector<QPoint> legalDests_;               // destinations of the selected piece
 
     const GuiBoard* board_ = nullptr;
     GuiBoard::Color bottom_ = GuiBoard::Color::White;

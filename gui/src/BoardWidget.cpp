@@ -2,9 +2,25 @@
 
 #include <QPainter>
 #include <QMouseEvent>
+#include <QSvgRenderer>
 
 BoardWidget::BoardWidget(QWidget* parent) : QWidget(parent) {
     setMinimumSize(320, 320);
+}
+
+QSvgRenderer* BoardWidget::rendererFor(char piece) {
+    auto it = renderers_.find(piece);
+    if (it != renderers_.end()) return it.value();
+
+    // ":/pieces/wK.svg" .. ":/pieces/bP.svg" (w/b prefix + upper piece letter).
+    const QChar c = QChar(piece).toUpper();
+    const QString path = QStringLiteral(":/pieces/%1%2.svg")
+                             .arg(GuiBoard::isWhite(piece) ? 'w' : 'b').arg(c);
+    auto* r = new QSvgRenderer(path, this);
+    QSvgRenderer* result = r->isValid() ? r : nullptr;
+    if (!result) r->deleteLater();
+    renderers_.insert(piece, result);          // cache the result (incl. nullptr)
+    return result;
 }
 
 void BoardWidget::setLastMove(int fromFile, int fromRank, int toFile, int toRank) {
@@ -73,25 +89,55 @@ void BoardWidget::paintEvent(QPaintEvent*) {
             if (board_) {
                 char piece = board_->at(file, rank);
                 if (piece != '.') {
-                    // Always render the SOLID glyph (the lowercase forms are the
-                    // filled ones), then fill + a contrasting outline so white
-                    // pieces stand out on light squares.
-                    const bool white = GuiBoard::isWhite(piece);
-                    const QString sym = GuiBoard::glyph(QChar(piece).toLower().toLatin1());
-                    const QColor fill    = white ? QColor(0xF6, 0xF6, 0xF4)
-                                                 : QColor(0x1C, 0x1C, 0x1C);
-                    const QColor outline = white ? QColor(0x10, 0x10, 0x10)
-                                                 : QColor(0xD0, 0xD0, 0xD0);
-                    const int o = qMax(1, cell / 28);
-                    g.setPen(outline);
-                    for (int dx = -1; dx <= 1; ++dx)
-                        for (int dy = -1; dy <= 1; ++dy)
-                            if (dx || dy)
-                                g.drawText(r.translated(dx * o, dy * o),
-                                           Qt::AlignCenter, sym);
-                    g.setPen(fill);
-                    g.drawText(r, Qt::AlignCenter, sym);
+                    QSvgRenderer* svg = rendererFor(piece);
+                    if (svg) {
+                        // Render the SVG sprite centred with a small margin so it
+                        // doesn't touch the square edges.
+                        const qreal m = cell * 0.06;
+                        svg->render(&g, QRectF(r).adjusted(m, m, -m, -m));
+                    } else {
+                        // Fallback (sprite missing): the old Unicode glyph with a
+                        // contrasting outline so it reads on any square.
+                        const bool white = GuiBoard::isWhite(piece);
+                        const QString sym = GuiBoard::glyph(QChar(piece).toLower().toLatin1());
+                        const QColor fill    = white ? QColor(0xF6, 0xF6, 0xF4)
+                                                     : QColor(0x1C, 0x1C, 0x1C);
+                        const QColor outline = white ? QColor(0x10, 0x10, 0x10)
+                                                     : QColor(0xD0, 0xD0, 0xD0);
+                        const int o = qMax(1, cell / 28);
+                        g.setPen(outline);
+                        for (int dx = -1; dx <= 1; ++dx)
+                            for (int dy = -1; dy <= 1; ++dy)
+                                if (dx || dy)
+                                    g.drawText(r.translated(dx * o, dy * o),
+                                               Qt::AlignCenter, sym);
+                        g.setPen(fill);
+                        g.drawText(r, Qt::AlignCenter, sym);
+                    }
                 }
+            }
+        }
+    }
+
+    // Legal-move markers for the selected piece, on top of everything: a centred
+    // dot on empty targets, a ring around occupied ones (captures).
+    if (board_ && !legalDests_.isEmpty()) {
+        g.setRenderHint(QPainter::Antialiasing, true);
+        for (const QPoint& d : legalDests_) {
+            const QRectF sq = squareRect(d.x(), d.y());
+            const bool occupied = board_->at(d.x(), d.y()) != '.';
+            if (occupied) {
+                QPen pen(QColor(0, 0, 0, 70));
+                pen.setWidthF(qMax<qreal>(2.0, cell / 12.0));
+                g.setPen(pen);
+                g.setBrush(Qt::NoBrush);
+                const qreal inset = cell * 0.08;
+                g.drawEllipse(sq.adjusted(inset, inset, -inset, -inset));
+            } else {
+                g.setPen(Qt::NoPen);
+                g.setBrush(QColor(0, 0, 0, 45));
+                const qreal dia = cell * 0.30;
+                g.drawEllipse(sq.center(), dia / 2.0, dia / 2.0);
             }
         }
     }
@@ -107,6 +153,7 @@ void BoardWidget::mousePressEvent(QMouseEvent* e) {
         char p = board_->at(file, rank);
         if (p != '.' && GuiBoard::colorOf(p) == humanColor_) {
             selFile_ = file; selRank_ = rank;
+            legalDests_ = board_->legalDestinations(file, rank);
             update();
         }
         return;

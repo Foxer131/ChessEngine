@@ -319,7 +319,8 @@ struct Worker {
         return alpha;
     }
 
-    int negamax(int depth, int alpha, int beta, int ply, Move prevMove) {
+    int negamax(int depth, int alpha, int beta, int ply, Move prevMove,
+                Move excludedMove = MOVE_NONE) {
         if (out_of_time()) return 0;
         ++nodes;
 
@@ -338,14 +339,25 @@ struct Worker {
         // Transposition table probe.
         bool ttHit;
         TTEntry* tte = shared.tt.probe(pos.key(), ttHit);
-        Move ttMove = MOVE_NONE;
+        // Snapshot the TT fields into locals: the singular verification search and
+        // the child searches below probe/store the shared table and may overwrite
+        // the slot `tte` points at, so anything we need after a recursive call must
+        // be read here, up front.
+        Move  ttMove  = MOVE_NONE;
+        int   ttScore = 0;
+        int   ttDepth = 0;
+        Bound ttBound = BOUND_NONE;
         if (ttHit) {
-            ttMove = tte->move;
-            if (!root && tte->depth >= depth) {
-                int s = from_tt(tte->score, ply);
-                if (tte->bound == BOUND_EXACT) return s;
-                if (tte->bound == BOUND_LOWER && s >= beta)  return s;
-                if (tte->bound == BOUND_UPPER && s <= alpha) return s;
+            ttMove  = tte->move;
+            ttScore = from_tt(tte->score, ply);
+            ttDepth = tte->depth;
+            ttBound = Bound(tte->bound);
+            // No TT cutoff while verifying singularity (the stored entry includes
+            // the move we are trying to exclude).
+            if (!root && excludedMove == MOVE_NONE && ttDepth >= depth) {
+                if (ttBound == BOUND_EXACT) return ttScore;
+                if (ttBound == BOUND_LOWER && ttScore >= beta)  return ttScore;
+                if (ttBound == BOUND_UPPER && ttScore <= alpha) return ttScore;
             }
         }
 
@@ -388,7 +400,26 @@ struct Worker {
         int  moveCount = 0;
 
         for (Move m : moves) {
+            if (m == excludedMove) continue;   // verifying singularity: skip it
             ++moveCount;
+
+            // Singular extension: if the TT move is much better than every
+            // alternative, follow it one ply deeper. We prove it by re-searching
+            // this node at reduced depth, EXCLUDING the TT move, with a window just
+            // below the TT score; if no other move can reach that bar (fails low),
+            // the position hinges on the TT move - so extend it. This is the sound,
+            // verified form of "go deeper on the one promising move".
+            int extension = 0;
+            if (!root && !inCheck && m == ttMove && excludedMove == MOVE_NONE
+                && depth >= 8 && ttDepth >= depth - 3 && ttBound != BOUND_UPPER
+                && std::abs(ttScore) < MATE_IN_MAX) {
+                const int singularBeta  = ttScore - 2 * depth;
+                const int singularDepth = (depth - 1) / 2;
+                int s = negamax(singularDepth, singularBeta - 1, singularBeta,
+                                ply, prevMove, /*excludedMove=*/ttMove);
+                if (s < singularBeta) extension = 1;
+            }
+
             const bool capture = is_capture(pos, m);
             const bool quiet   = !capture && m.type_of() != PROMOTION;
 
@@ -412,9 +443,11 @@ struct Worker {
 
             repList.push_back(pos.key());
 
+            const int newDepth = depth - 1 + extension;   // singular extension folds in here
+
             int score;
             if (moveCount == 1) {
-                score = -negamax(depth - 1, -beta, -alpha, ply + 1, m);   // PV: full window
+                score = -negamax(newDepth, -beta, -alpha, ply + 1, m);   // PV: full window
             } else {
                 int R = 0;  // late move reduction for quiet, non-checking moves
                 if (depth >= 3 && moveCount > 3 && quiet && !givesCheck && !inCheck) {
@@ -423,11 +456,11 @@ struct Worker {
                     R = std::max(0, std::min(R, depth - 2));
                 }
 
-                score = -negamax(depth - 1 - R, -alpha - 1, -alpha, ply + 1, m);  // reduced null window
+                score = -negamax(newDepth - R, -alpha - 1, -alpha, ply + 1, m);  // reduced null window
                 if (score > alpha && R > 0)
-                    score = -negamax(depth - 1, -alpha - 1, -alpha, ply + 1, m);  // re-search full depth
+                    score = -negamax(newDepth, -alpha - 1, -alpha, ply + 1, m);  // re-search full depth
                 if (score > alpha && score < beta)
-                    score = -negamax(depth - 1, -beta, -alpha, ply + 1, m);       // re-search full window
+                    score = -negamax(newDepth, -beta, -alpha, ply + 1, m);       // re-search full window
             }
 
             repList.pop_back();
@@ -462,7 +495,10 @@ struct Worker {
         Bound flag = (bestScore <= origAlpha) ? BOUND_UPPER
                    : (bestScore >= beta)       ? BOUND_LOWER
                                                : BOUND_EXACT;
-        if (tte->key != pos.key() || depth >= tte->depth || flag == BOUND_EXACT)
+        // Skip the store during a singular verification search: its result is a
+        // partial value for a node with one move removed, not the true node score.
+        if (excludedMove == MOVE_NONE
+            && (tte->key != pos.key() || depth >= tte->depth || flag == BOUND_EXACT))
             *tte = TTEntry{ pos.key(), bestMove,
                             static_cast<std::int16_t>(to_tt(bestScore, ply)),
                             static_cast<std::int8_t>(depth), static_cast<std::uint8_t>(flag) };

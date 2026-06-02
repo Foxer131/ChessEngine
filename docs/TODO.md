@@ -48,12 +48,25 @@ HCE-only engine.
 - [ ] **Eval tuning (Texel)** — tune the hand-crafted term weights. Lower priority
       now that NNUE is the default/stronger eval; only worth it to strengthen the
       secondary HCE option.
-- [ ] **More search heuristics** — singular extensions, internal iterative
-      reductions, history gravity/aging. Each small; validate with SPRT. NOTE:
-      improving-flag + continuation-history + history-based LMR were tried together
-      and regressed (reverted) — re-attempt individually, tuned, with SPRT.
+- [x] **Singular extensions — DONE** (`main`). At `depth>=10`, re-search the node
+      excluding the TT move at `(depth-1)/2` under a `3*depth` margin; if every
+      other move fails low, extend the TT move +1 ply. SPRT **+26 fixed-nodes /
+      +31 wall-clock**. LESSON: the untuned first cut (`depth>=8`, `2*depth`) was
+      **−27 Elo** — the verification fired too often and ate the node budget.
+      Tightening the trigger flipped it. Don't loosen the trigger without re-SPRT.
+- [ ] **More search heuristics** — internal iterative reductions, history
+      gravity/aging, double/negative singular extensions (extend +2 when very
+      singular; reduce when `singularBeta>=beta` = multicut). Each small; SPRT.
+      NOTE: improving-flag + continuation-history + history-based LMR were tried
+      together and regressed (reverted) — re-attempt individually, tuned, with SPRT.
 
 ## Speed (NPS / depth)
+- [x] **Captures-only quiescence — DONE** (`main`). Quiescence (most nodes) only
+      ever plays captures/promotions but used to generate + sort ALL legal moves
+      then skip the quiets. `generate_legal_captures` (same legal filter, narrower
+      pseudo list, same relative order = bit-identical search) cut ~12% wall-clock
+      at fixed depth → SPRT **+30 Elo / LOS 99%**. (LTO was tried alongside and
+      measured neutral with `-O3 -march=native` already on — not merged.)
 - [x] **Direct legal move generation — DONE** (`movegen.cpp`, on `main`). checkers +
       pinned filter, no make/unmake per move (en-passant verified once). ~2x NPS
       (NNUE 583k→1325k), **+163 Elo** SPRT. Validated on 5 CPW perft positions.

@@ -13,7 +13,14 @@ Where the engine is *today* (so a new session can pick up TODOs without re-deriv
 
 - **Strength & search:** working alpha-beta/PVS engine (TT, iterative deepening,
   aspiration, quiescence+SEE, killers/history/counter-moves, null-move, RFP,
-  futility, LMP, LMR, check extensions). **Lazy SMP multithreading is done**
+  futility, LMP, LMR, check extensions, **singular extensions**). Singular: at
+  `depth>=10`, re-search excluding the TT move at `(depth-1)/2` under a `3*depth`
+  margin; if all others fail low, extend it +1 ply. SPRT **+26 fixed-nodes / +31
+  wall-clock**. The *untuned* v1 (`depth>=8`, `2*depth`) was **−27** — a textbook
+  SPRT-over-eyeball save (it drew the Magnus bot beautifully, yet measured worse;
+  only the tighter trigger flipped it positive). Quiescence uses a captures-only
+  generator (`generate_legal_captures`) — **+30 Elo** by not generating/sorting
+  the quiets it discarded. **Lazy SMP multithreading is done**
   (UCI `Threads`; SPRT-measured **+127 Elo** 8-vs-1 thread). Architecture: search
   lives in `engine/src/search/search.cpp` as a `Worker` (all per-thread state) +
   a shared lockless `TranspositionTable`, injected via `SharedState`

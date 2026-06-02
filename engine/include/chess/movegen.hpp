@@ -18,6 +18,11 @@ namespace chess {
 
 void generate_legal(Position& pos, MoveList& list);
 
+// Legal "noisy" moves only: captures, en passant and promotions (the quiescence
+// search's move set). Produces the same moves generate_legal would, restricted to
+// that subset and in the same relative order.
+void generate_legal_captures(Position& pos, MoveList& list);
+
 std::uint64_t perft(Position& pos, int depth);
 
 } // namespace chess

@@ -48,28 +48,40 @@ void generate_castling(const Position& pos, MoveList& list, Color us) {
 
 // Pseudo-legal moves: everything the pieces can do, NOT yet filtered for leaving
 // the own king in check. generate_legal does that filtering.
-void generate_pseudo(const Position& pos, MoveList& list) {
+//
+// When `capturesOnly` is set, only "noisy" moves are emitted: captures, en
+// passant, and ALL promotions (including quiet push-promotions, which the
+// quiescence search also examines). Quiet non-promotion moves, double pushes and
+// castling are skipped. The emission ORDER of the noisy moves is identical to the
+// full generator (same piece/square order), so a stable move ordering produces
+// the exact same processed sequence in quiescence - the search stays bit-for-bit
+// identical, it just stops generating moves it would have discarded.
+void generate_pseudo(const Position& pos, MoveList& list, bool capturesOnly) {
     const Color    us    = pos.side_to_move();
     const Color    them  = ~us;
     const Bitboard own   = pos.pieces(us);
     const Bitboard enemy = pos.pieces(them);
     const Bitboard occ   = pos.pieces();
 
+    // Non-pawn pieces target enemy squares only in captures-only mode, otherwise
+    // every non-own square.
+    const Bitboard targets = capturesOnly ? enemy : ~own;
+
     // Knights
     Bitboard bb = pos.pieces(us, KNIGHT);
-    while (bb) { Square s = pop_lsb(bb); add_targets(list, s, knight_attacks(s) & ~own); }
+    while (bb) { Square s = pop_lsb(bb); add_targets(list, s, knight_attacks(s) & targets); }
 
     // Bishops + queens (diagonal rays)
     bb = pos.pieces(us, BISHOP) | pos.pieces(us, QUEEN);
-    while (bb) { Square s = pop_lsb(bb); add_targets(list, s, bishop_attacks(s, occ) & ~own); }
+    while (bb) { Square s = pop_lsb(bb); add_targets(list, s, bishop_attacks(s, occ) & targets); }
 
     // Rooks + queens (straight rays)
     bb = pos.pieces(us, ROOK) | pos.pieces(us, QUEEN);
-    while (bb) { Square s = pop_lsb(bb); add_targets(list, s, rook_attacks(s, occ) & ~own); }
+    while (bb) { Square s = pop_lsb(bb); add_targets(list, s, rook_attacks(s, occ) & targets); }
 
     // King (castling handled separately)
     Square ks = pos.king_square(us);
-    add_targets(list, ks, king_attacks(ks) & ~own);
+    add_targets(list, ks, king_attacks(ks) & targets);
 
     // Pawns
     const int  push      = (us == WHITE) ? 8 : -8;
@@ -80,12 +92,14 @@ void generate_pseudo(const Position& pos, MoveList& list) {
     while (bb) {
         Square s = pop_lsb(bb);
 
-        // Single (and double) push onto empty squares.
+        // Single (and double) push onto empty squares. A push to the last rank is
+        // a promotion (noisy) and is always emitted; ordinary quiet pushes are
+        // skipped in captures-only mode.
         Square one = Square(s + push);
         if (pos.empty(one)) {
             if (rank_of(one) == promoRank) {
                 add_promotions(list, s, one);
-            } else {
+            } else if (!capturesOnly) {
                 list.add(Move::make(s, one));
                 Square two = Square(s + 2 * push);
                 if (rank_of(s) == startRank && pos.empty(two))
@@ -107,14 +121,13 @@ void generate_pseudo(const Position& pos, MoveList& list) {
             list.add(Move::make(s, pos.ep_square(), EN_PASSANT));
     }
 
-    generate_castling(pos, list, us);
+    if (!capturesOnly)
+        generate_castling(pos, list, us);
 }
 
-} // namespace
-
-void generate_legal(Position& pos, MoveList& list) {
-    MoveList pseudo;
-    generate_pseudo(pos, pseudo);
+// Filter a freshly generated pseudo-move list down to legal moves. Shared by the
+// full and captures-only entry points so the (subtle) legality logic lives once.
+void filter_legal(Position& pos, const MoveList& pseudo, MoveList& list) {
 
     const Color    us   = pos.side_to_move();
     const Color    them = ~us;
@@ -182,6 +195,22 @@ void generate_legal(Position& pos, MoveList& list) {
 
         list.add(m);
     }
+}
+
+} // namespace
+
+void generate_legal(Position& pos, MoveList& list) {
+    MoveList pseudo;
+    generate_pseudo(pos, pseudo, /*capturesOnly=*/false);
+    filter_legal(pos, pseudo, list);
+}
+
+// Legal captures, en passant and promotions only - the quiescence search's move
+// set. Same legality filter as generate_legal; just a narrower pseudo list.
+void generate_legal_captures(Position& pos, MoveList& list) {
+    MoveList pseudo;
+    generate_pseudo(pos, pseudo, /*capturesOnly=*/true);
+    filter_legal(pos, pseudo, list);
 }
 
 std::uint64_t perft(Position& pos, int depth) {

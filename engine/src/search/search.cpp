@@ -293,11 +293,10 @@ struct Worker {
         if (ply >= MAX_PLY - 1) return alpha;
 
         MoveList moves;
-        generate_legal(pos, moves);
+        generate_legal_captures(pos, moves);   // captures, en passant, promotions only
         order_moves(moves, MOVE_NONE, MOVE_NONE, ply, pos.side_to_move());
 
         for (Move m : moves) {
-            if (!is_capture(pos, m) && m.type_of() != PROMOTION) continue;  // captures/promos only
 
             // Delta pruning: if winning this piece (plus a margin) still can't
             // reach alpha, the capture is hopeless - skip it.

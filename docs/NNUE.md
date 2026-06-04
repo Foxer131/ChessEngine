@@ -91,12 +91,21 @@ the HCE in SPRT. Only then does net-labeled bootstrapping start to pay off.** Th
    but it's a later, carefully-verified step - a wrong SIMD pass silently corrupts
    eval, the exact bug class that cost an hour here.
 
-## Re-train workflow (data already generated)
+## Re-train workflow
 
-`powershell -File tools\training\retrain.ps1` does: normalize -> convert to
-bulletformat -> train (bullet+CUDA, ~seconds on the GPU). Then copy the newest
-`checkpoints\chessengine-*\quantised.bin` to `C:\chess_sprt\data\net.nnue` and
-SPRT vs HCE (ideally fixed-nodes; see lesson 5).
+> **NOTE (2026-06): the training data was DELETED to free ~40 GB.** Gone:
+> `C:\chess_nnue\bullet\data\public.binpack` (37.5 GB, the ODbL public Leela/SF
+> set) and the derived `train.data` / `*.txt` files. The **trained nets are
+> kept** (`C:\chess_sprt\data\*.nnue`) and `net_pub` is embedded in the binary, so
+> playing is unaffected. **To retrain you must re-acquire the data first**:
+> re-download the public binpack (the `nodes5000pv2_UHO`-style dataset) or
+> generate fresh self-play data via `gen_data` / `tools/cloud`. See
+> `docs/PROJECT_STATE.md`.
+
+Once the data is back: `powershell -File tools\training\retrain.ps1` does:
+normalize -> convert to bulletformat -> train (bullet+CUDA, ~seconds on the GPU).
+Then copy the newest `checkpoints\chessengine-*\quantised.bin` to
+`C:\chess_sprt\data\net.nnue` and SPRT vs HCE (ideally fixed-nodes; see lesson 5).
 
 ## Why NNUE, and the paradigm note
 

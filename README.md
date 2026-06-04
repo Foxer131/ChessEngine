@@ -29,6 +29,9 @@ neural-network evaluation, plus a Qt desktop GUI. The engine is a standalone
 
 See **[docs/NNUE.md](docs/NNUE.md)** for the full NNUE story (data → training →
 +Elo milestones) and **[docs/TODO.md](docs/TODO.md)** for what's next.
+**Resuming the project after a pause? Start with
+[docs/PROJECT_STATE.md](docs/PROJECT_STATE.md)** — the final handoff (state,
+build/run, and which training data was deleted to save disk + how to regenerate it).
 
 ## Layout
 

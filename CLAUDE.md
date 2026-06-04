@@ -5,6 +5,10 @@ A classical, **bitboard-based** chess engine in **modern C++ (C++20)**, plus a
 **Qt** desktop GUI. The engine is a standalone **UCI** process; the GUI is a
 separate process that drives it over UCI. CPU-only — see the GPU note below.
 
+**Resuming after a pause? Read [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md) first**
+— the final handoff: current state, build/run, and (critically) which training
+datasets were deleted to free disk space and how to regenerate them.
+
 **Next steps / open work: see [docs/TODO.md](docs/TODO.md)** (prioritized, with
 implementation notes). docs/ROADMAP.md is the original build order.
 
